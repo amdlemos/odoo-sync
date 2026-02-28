@@ -79,8 +79,8 @@ def init():
             f.write("# ODOO_HOST=localhost\n")
             f.write("# ODOO_PORT=8069\n")
             f.write("# ODOO_PROTOCOL=jsonrpc\n")
-            f.write("# ODOO_DB=uaau\n")
-            f.write("# ODOO_USER=admin@uaau.com\n")
+            f.write("# ODOO_DB=odoo\n")
+            f.write("# ODOO_USER=user@email.com\n")
             f.write("# ODOO_PASSWORD=password\n")
             f.write(
                 "\n# AI Agents Worker Pool (Descomente para sobrescrever a global)\n"
@@ -132,7 +132,7 @@ O usuário empacotou uma ferramenta de linha de comando chamada `odoo-sync`. Voc
     console.print(f"[green]✓ Projeto inicializado![/green]")
     console.print(f"Edite [cyan]{local_env}[/cyan] para definir o ID do projeto.")
     console.print(
-        f"Instruções para Agentes IA geradas em [cyan]AI_SYSTEM_PROMPT.md[/cyan]"
+        f"Instruções para Agentes IA geradas em [cyan].odoo-agent-rules.md[/cyan]"
     )
 
 
