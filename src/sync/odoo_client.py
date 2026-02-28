@@ -36,7 +36,7 @@ class OdooClient:
         "create_date",
         "write_date",
         # Controle de tempo
-        "planned_hours",
+        "allocated_hours",
         "effective_hours",
         "remaining_hours",
         "progress",
@@ -81,6 +81,10 @@ class OdooClient:
             )
             self.odoo = odoorpc.ODOO(host, protocol=protocol, port=port)
             self.uid = self.odoo.login(db, user, password)
+            if self.uid is None:
+                # Se login retorna None (em versões antigas do odoorpc ou setups específicos),
+                # tenta buscar o uid atual
+                self.uid = self.odoo.env.uid
             self.logger.info(f"Autenticado com sucesso. UID: {self.uid}")
         except Exception as e:
             self.logger.error(f"Falha na autenticação: {e}")
@@ -224,6 +228,118 @@ class OdooClient:
         except Exception as e:
             self.logger.error(f"Erro ao criar tarefa: {e}")
             raise
+
+    def get_available_agent(self, agent_employee_ids: List[int]) -> Optional[int]:
+        """
+        Retorna o ID do primeiro funcionário agente que não tem nenhum timer rodando.
+
+        Args:
+            agent_employee_ids: Lista de IDs de empregados que representam os agentes de IA
+
+        Returns:
+            ID do empregado agente disponível ou None se todos estiverem ocupados
+        """
+        # Buscamos todas as linhas de timesheet que estão rodando atualmente (unit_amount == 0)
+        # e que pertencem aos nossos agentes.
+        running_timers = self.env["account.analytic.line"].search_read(
+            [
+                ("date_time", "!=", False),
+                ("employee_id", "in", agent_employee_ids),
+                ("unit_amount", "=", 0),  # Timer aberto
+            ],
+            ["employee_id"],
+        )
+
+        # Extraímos os IDs dos funcionários que estão ocupados
+        busy_employee_ids = [
+            timer["employee_id"][0]
+            for timer in running_timers
+            if timer.get("employee_id")
+        ]
+
+        # Retornamos o primeiro agente que NÃO está na lista de ocupados
+        for employee_id in agent_employee_ids:
+            if employee_id not in busy_employee_ids:
+                return employee_id
+
+        return None
+
+    def start_ai_task_timer(
+        self, task_id: int, description: str, llm_model: str
+    ) -> Dict[str, Any]:
+        """
+        Inicia um timesheet para a tarefa usando um agente de IA disponível.
+
+        Args:
+            task_id: ID da tarefa no Odoo
+            description: Descrição do trabalho sendo realizado
+            llm_model: Nome do modelo (ex: 'gpt-4o', 'claude-3.5-sonnet')
+
+        Returns:
+            Dicionário com timer_id, agent_id e agent_name
+        """
+        import os
+
+        # 1. Pega os IDs configurados no .env (se não existir, tenta 2, 3, 4 que achamos no banco)
+        agent_ids_str = os.getenv("AI_AGENT_IDS", "2,3,4")
+        pool_ids = [int(id.strip()) for id in agent_ids_str.split(",") if id.strip()]
+
+        # 2. Acha quem tá livre
+        agent_id = self.get_available_agent(pool_ids)
+        if not agent_id:
+            raise Exception(
+                "Nenhum Agente de IA está livre no momento. Todos estão com timers rodando."
+            )
+
+        # 3. Formata a assinatura
+        agent_name = self.env["hr.employee"].browse(agent_id).read(["name"])[0]["name"]
+        full_desc = f"{description} [{agent_name} | {llm_model}]"
+
+        # Pega info do projeto
+        task = self.env["project.task"].browse(task_id).read(["project_id"])[0]
+        if not task.get("project_id"):
+            raise ValueError(f"A tarefa {task_id} não tem um projeto vinculado.")
+
+        # 4. Inicia o timesheet NO NOME DO AGENTE
+        vals = {
+            "task_id": task_id,
+            "project_id": task["project_id"][0],
+            "employee_id": agent_id,
+            "name": full_desc,
+            "unit_amount": 0.0,
+        }
+
+        try:
+            timer_id = self.env["account.analytic.line"].create(vals)
+            self.logger.info(
+                f"Timer {timer_id} iniciado para tarefa {task_id} pelo {agent_name}"
+            )
+            return {
+                "timer_id": timer_id,
+                "agent_id": agent_id,
+                "agent_name": agent_name,
+            }
+        except Exception as e:
+            self.logger.error(f"Erro ao iniciar timer para tarefa {task_id}: {e}")
+            raise
+
+    def stop_ai_task_timer(self, timesheet_id: int) -> bool:
+        """
+        Para um cronômetro específico de uma IA.
+
+        Args:
+            timesheet_id: ID do timesheet (retornado pelo start_ai_task_timer)
+
+        Returns:
+            True se sucesso, False se falha
+        """
+        try:
+            self.env["account.analytic.line"].browse(timesheet_id).button_end_work()
+            self.logger.info(f"Timer {timesheet_id} parado com sucesso")
+            return True
+        except Exception as e:
+            self.logger.error(f"Erro ao parar timer {timesheet_id}: {e}")
+            return False
 
     def update_task(self, task_id: int, values: Dict[str, Any]) -> bool:
         """

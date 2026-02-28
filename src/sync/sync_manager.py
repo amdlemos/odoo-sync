@@ -391,7 +391,7 @@ class SyncManager:
 
         # Controle de tempo
         time_tracking = TaskTimeTracking(
-            planned_hours=raw.get("planned_hours", 0.0),
+            planned_hours=raw.get("allocated_hours", 0.0),
             effective_hours=raw.get("effective_hours", 0.0),
             remaining_hours=raw.get("remaining_hours", 0.0),
             progress_percent=raw.get("progress", 0.0),

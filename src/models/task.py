@@ -43,11 +43,11 @@ class TaskStatus(BaseModel):
 class TaskDates(BaseModel):
     """Datas relevantes da tarefa"""
 
-    date_deadline: Optional[str] = None
-    planned_date_start: Optional[str] = None
-    planned_date_end: Optional[str] = None
-    date_assign: Optional[str] = None
-    date_end: Optional[str] = None
+    date_deadline: Optional[Any] = None
+    planned_date_start: Optional[Any] = None
+    planned_date_end: Optional[Any] = None
+    date_assign: Optional[Any] = None
+    date_end: Optional[Any] = None
     create_date: str
     write_date: str
 
