@@ -518,3 +518,33 @@ MIT License - Sinta-se livre para usar e modificar.
 **Desenvolvido com ❤️ para integração Odoo + IA**
 
 Para dúvidas ou sugestões, abra uma issue!
+### Gestão de Timesheet com Agentes (Multi-Agent)
+
+O sistema suporta múltiplos agentes trabalhando simultaneamente nas tarefas sem haver colapso ou sobreposição de horas. Para utilizar:
+
+1. Crie os agentes no Odoo como Empregados (Employees).
+2. Configure o seu usuário como Gerente (`Manager`) de cada agente para que as horas caiam nos seus relatórios.
+3. Obtenha os IDs numéricos dos Agentes no Odoo (ex: 2, 3, 4).
+4. Configure no seu arquivo `.env`:
+
+```env
+# AI Agent Configuration
+AI_AGENT_IDS=2,3,4
+```
+
+Quando um agente precisar iniciar um trabalho, o sistema procurará automaticamente qual agente está livre e atrelará a linha de Timesheet (Timer) a esse agente livre.
+
+```python
+# Iniciar trabalho
+res = client.start_ai_task_timer(
+    task_id=5, 
+    description="Implementando testes de API", 
+    llm_model="claude-3.5-sonnet"
+)
+print(f"Agente alocado: {res['agent_name']} | Timer ID: {res['timer_id']}")
+
+# O agente faz o seu processamento...
+
+# Parar o tempo
+client.stop_ai_task_timer(res['timer_id'])
+```
