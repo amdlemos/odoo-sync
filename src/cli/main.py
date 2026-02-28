@@ -63,7 +63,7 @@ def cli():
 def init():
     """Inicializar configuração no diretório atual"""
     local_env = Path.cwd() / ".odoo-sync.env"
-    prompt_file = Path.cwd() / "AI_SYSTEM_PROMPT.md"
+    prompt_file = Path.cwd() / ".odoo-agent-rules.md"
 
     if local_env.exists():
         console.print(
@@ -73,6 +73,19 @@ def init():
         with open(local_env, "w") as f:
             f.write("# Configuração Local do Odoo Sync\n")
             f.write("DEFAULT_PROJECT_ID=\n")
+            f.write(
+                "\n# Odoo Configuração (Descomente se este projeto usar credenciais específicas ao invés da global ~/.config/odoo-sync/.env)\n"
+            )
+            f.write("# ODOO_HOST=localhost\n")
+            f.write("# ODOO_PORT=8069\n")
+            f.write("# ODOO_PROTOCOL=jsonrpc\n")
+            f.write("# ODOO_DB=uaau\n")
+            f.write("# ODOO_USER=admin@uaau.com\n")
+            f.write("# ODOO_PASSWORD=password\n")
+            f.write(
+                "\n# AI Agents Worker Pool (Descomente para sobrescrever a global)\n"
+            )
+            f.write("# AI_AGENT_IDS=2,3,4\n")
 
     # Criar template de prompt para IAs se não existir
     if not prompt_file.exists():
