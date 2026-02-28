@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "odoo-task-sync"
+version = "0.1.0"
+description = "CLI tools for syncing and managing Odoo tasks with AI agents"
+authors = [
+    {name = "Alan Lemos", email = "amdlemos@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "odoorpc==0.10.1",
+    "python-dotenv>=1.0.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "questionary>=2.0.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+odoo-sync = "odoo_task_sync.cli.main:cli"
+
+[tool.setuptools]
+package-dir = {"odoo_task_sync" = "src"}
+packages = ["odoo_task_sync", "odoo_task_sync.cli", "odoo_task_sync.models", "odoo_task_sync.sync", "odoo_task_sync.ai"]
