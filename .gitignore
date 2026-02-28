@@ -1,0 +1,46 @@
+# Environment
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Data files
+data/tasks/*.json
+data/metadata/*.json
+data/ai_workspace/*.json
+
+# Keep example files
+!data/tasks/.gitkeep
+!data/metadata/.gitkeep
+!data/ai_workspace/.gitkeep
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Config (keep examples)
+config/*.json
+!config/*.example.json
