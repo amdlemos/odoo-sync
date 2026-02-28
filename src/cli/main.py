@@ -13,22 +13,24 @@ from src.sync.sync_manager import SyncManager
 
 console = Console()
 
+
 def load_config():
     """Load configuration from global and local env files"""
     # 1. Load global config
     global_env = Path.home() / ".config" / "odoo-sync" / ".env"
     if global_env.exists():
         load_dotenv(global_env)
-        
+
     # 2. Load local config (overrides global)
     local_env = Path.cwd() / ".odoo-sync.env"
     if local_env.exists():
         load_dotenv(local_env)
-        
+
     # Fallback to standard .env if we are in the source directory
     source_env = Path(__file__).parent.parent.parent / ".env"
     if source_env.exists() and not local_env.exists():
         load_dotenv(source_env)
+
 
 def get_client():
     load_config()
@@ -38,73 +40,122 @@ def get_client():
     db = os.getenv("ODOO_DB")
     user = os.getenv("ODOO_USER")
     password = os.getenv("ODOO_PASSWORD")
-    
+
     if not all([host, db, user, password]):
         console.print("[red]❌ Erro: Configurações do Odoo não encontradas.[/red]")
         console.print("Execute [cyan]odoo-sync init[/cyan] para configurar.")
         sys.exit(1)
-        
+
     try:
         return OdooClient(host, port, db, user, password, protocol)
     except Exception as e:
         console.print(f"[red]❌ Erro de conexão: {e}[/red]")
         sys.exit(1)
 
+
 @click.group()
 def cli():
     """CLI para sincronizar tarefas do Odoo e gerenciar agentes de IA."""
     pass
 
+
 @cli.command()
 def init():
     """Inicializar configuração no diretório atual"""
     local_env = Path.cwd() / ".odoo-sync.env"
+    prompt_file = Path.cwd() / "AI_SYSTEM_PROMPT.md"
+
     if local_env.exists():
-        console.print("[yellow]Aviso: .odoo-sync.env já existe neste diretório.[/yellow]")
-        return
-        
-    with open(local_env, "w") as f:
-        f.write("# Configuração Local do Odoo Sync\n")
-        f.write("DEFAULT_PROJECT_ID=\n")
-        
+        console.print(
+            "[yellow]Aviso: .odoo-sync.env já existe neste diretório.[/yellow]"
+        )
+    else:
+        with open(local_env, "w") as f:
+            f.write("# Configuração Local do Odoo Sync\n")
+            f.write("DEFAULT_PROJECT_ID=\n")
+
+    # Criar template de prompt para IAs se não existir
+    if not prompt_file.exists():
+        prompt_content = """# Odoo-Task-Sync AI System Prompt
+
+Você é um agente de IA especializado em desenvolvimento de software e tem permissão para gerenciar a própria tarefa que está resolvendo diretamente no Odoo do usuário.
+
+## Ferramenta Disponível
+O usuário empacotou uma ferramenta de linha de comando chamada `odoo-sync`. Você deve usar essa ferramenta via bash para iniciar cronômetros de trabalho (timesheets), baixar tarefas e mudar as tarefas de estágio ao final.
+
+## Seu Fluxo de Trabalho Obrigatório
+
+1. **Entender a Tarefa**: Leia os arquivos `.json` na pasta local `data/tasks/` se o usuário não tiver detalhado o que você deve fazer.
+2. **Iniciar Cronômetro**: SEMPRE que começar a atuar numa tarefa, você DEVE ligar o seu cronômetro para que o esforço seja registrado no seu nome.
+   ```bash
+   odoo-sync timer start --task <ID_DA_TAREFA> --desc "<DESCRICAO DO QUE VAI FAZER>" --model "<SEU_NOME_EX_OPENCODE>"
+   ```
+   **MUITO IMPORTANTE:** Guarde o ID do cronômetro retornado por este comando!
+3. **Executar**: Escreva e altere os arquivos conforme solicitado pelo usuário.
+4. **Parar Cronômetro**: Assim que você finalizar o código ou a etapa proposta, PARE O CRONÔMETRO IMEDIATAMENTE usando o ID que você guardou no passo 2.
+   ```bash
+   odoo-sync timer stop --id <ID_DO_CRONOMETRO>
+   ```
+5. **Mover Estágio (Se Concluído)**: Se o usuário disser que a tarefa está 100% resolvida e pedir para fechar:
+   Primeiro descubra os estágios: `odoo-sync task stages`
+   Depois mova: `odoo-sync task move --task <ID_DA_TAREFA> --stage <ID_DO_ESTAGIO_CONCLUIDO>`
+
+## Comandos da CLI `odoo-sync`
+
+- `odoo-sync init` -> Inicializa as variáveis locais para o projeto atual.
+- `odoo-sync pull [--project ID]` -> Baixa e atualiza o json de tarefas na máquina.
+- `odoo-sync timer start --task ID --desc "Texto" --model "nome_da_ia"` -> Liga timer.
+- `odoo-sync timer stop --id TIMER_ID` -> Desliga timer.
+- `odoo-sync task stages` -> Lista os IDs e Nomes de estágios de projetos.
+- `odoo-sync task move --task ID --stage STAGE_ID` -> Muda o status da tarefa.
+"""
+        with open(prompt_file, "w") as f:
+            f.write(prompt_content)
+
     # Create data directory structure in current working directory
     data_dir = Path.cwd() / "data" / "tasks"
     data_dir.mkdir(parents=True, exist_ok=True)
-    
+
     console.print(f"[green]✓ Projeto inicializado![/green]")
     console.print(f"Edite [cyan]{local_env}[/cyan] para definir o ID do projeto.")
+    console.print(
+        f"Instruções para Agentes IA geradas em [cyan]AI_SYSTEM_PROMPT.md[/cyan]"
+    )
+
 
 @cli.command()
 @click.option("--project", "-p", type=int, help="ID do projeto")
-@click.option("--user", "-u", type=int, help="ID do usuário (padrão: usuário autenticado)")
+@click.option(
+    "--user", "-u", type=int, help="ID do usuário (padrão: usuário autenticado)"
+)
 @click.option("--include-completed", is_flag=True, help="Incluir tarefas completadas")
 def pull(project, user, include_completed):
     """Baixar tarefas do Odoo para arquivo JSON local"""
     load_config()
-    
+
     # Use env defaults if not provided via CLI
     if not project and os.getenv("DEFAULT_PROJECT_ID"):
         try:
             project = int(os.getenv("DEFAULT_PROJECT_ID"))
         except ValueError:
             pass
-            
+
     client = get_client()
     data_dir = Path.cwd() / "data"
     sync_manager = SyncManager(client, data_dir)
-    
+
     console.print("[yellow]Baixando tarefas...[/yellow]")
     filepath = sync_manager.pull_tasks(
-        project_id=project, 
-        user_id=user, 
-        include_completed=include_completed
+        project_id=project, user_id=user, include_completed=include_completed
     )
     console.print(f"[green]✓ Tarefas salvas em:[/green] [cyan]{filepath}[/cyan]")
+
 
 @cli.group()
 def timer():
     """Gerenciar cronômetros de tarefas (Timesheet)"""
     pass
+
 
 @timer.command(name="start")
 @click.option("--task", required=True, type=int, help="ID da tarefa")
@@ -122,6 +173,7 @@ def timer_start(task, desc, model):
         console.print(f"[red]❌ Erro ao iniciar cronômetro: {e}[/red]")
         sys.exit(1)
 
+
 @timer.command(name="stop")
 @click.option("--id", required=True, type=int, help="ID do cronômetro (Timesheet ID)")
 def timer_stop(id):
@@ -134,10 +186,12 @@ def timer_stop(id):
         console.print(f"[red]❌ Falha ao parar o cronômetro {id}[/red]")
         sys.exit(1)
 
+
 @cli.group()
 def task():
     """Gerenciar e modificar tarefas"""
     pass
+
 
 @task.command(name="move")
 @click.option("--task", required=True, type=int, help="ID da tarefa")
@@ -152,20 +206,22 @@ def task_move(task, stage):
         console.print(f"[red]❌ Falha ao mover tarefa {task}[/red]")
         sys.exit(1)
 
+
 @task.command(name="stages")
 @click.option("--project", "-p", type=int, help="ID do projeto para filtrar estágios")
 def list_stages(project):
     """Listar todos os estágios disponíveis"""
     client = get_client()
     stages = client.get_task_stages(project)
-    
+
     if not stages:
         console.print("[yellow]Nenhum estágio encontrado.[/yellow]")
         return
-        
+
     console.print("\n[bold]Estágios Disponíveis:[/bold]")
     for stage in stages:
         console.print(f"[{stage['id']}] {stage['name']}")
+
 
 if __name__ == "__main__":
     cli()
