@@ -26,3 +26,4 @@ odoo-sync = "odoo_task_sync.cli.main:cli"
 [tool.setuptools]
 package-dir = {"odoo_task_sync" = "src"}
 packages = ["odoo_task_sync", "odoo_task_sync.cli", "odoo_task_sync.models", "odoo_task_sync.sync", "odoo_task_sync.ai"]
+include-package-data = true

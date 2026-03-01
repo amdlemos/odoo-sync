@@ -374,6 +374,26 @@ odoo-task-sync/
 }
 ```
 
+### Atualizar uma tarefa (CLI)
+
+Você pode atualizar campos de tarefas diretamente com a CLI `odoo-sync`.
+
+Exemplos:
+
+```bash
+# Mudar nome e estágio
+odoo-sync task update --task 42 --name "Revisar OAuth" --stage 3
+
+# Desvincular parent_id (remover vínculo de pai)
+odoo-sync task update --task 42 --clear-parent
+
+# Substituir usuários atribuídos
+odoo-sync task update --task 42 -a 2 -a 3
+
+# Remover todos os usuários atribuídos
+odoo-sync task update --task 42 --clear-assign
+```
+
 ### 3. Melhorar Descrição
 
 ```json

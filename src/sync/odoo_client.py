@@ -299,11 +299,27 @@ class OdooClient:
         task = self.env["project.task"].browse(task_id).read(["project_id"])[0]
         if not task.get("project_id"):
             raise ValueError(f"A tarefa {task_id} não tem um projeto vinculado.")
+        project_id = task["project_id"][0]
+
+        # Regra: sempre que um agente inicia uma tarefa, movemos a tarefa
+        # para o estágio de desenvolvimento (se existir). Procuramos por
+        # estágios com nomes comuns (pt/en) e aplicamos se encontrado.
+        dev_stage = self.get_development_stage_id(project_id)
+        if dev_stage:
+            try:
+                self.env["project.task"].browse(task_id).write({"stage_id": dev_stage})
+                self.logger.info(
+                    f"Tarefa {task_id} movida para estágio de desenvolvimento ({dev_stage}) antes de iniciar o timer"
+                )
+            except Exception as e:
+                self.logger.warning(
+                    f"Falha ao mover tarefa {task_id} para estágio de desenvolvimento: {e}"
+                )
 
         # 4. Inicia o timesheet NO NOME DO AGENTE
         vals = {
             "task_id": task_id,
-            "project_id": task["project_id"][0],
+            "project_id": project_id,
             "employee_id": agent_id,
             "name": full_desc,
             "unit_amount": 0.0,
@@ -322,6 +338,33 @@ class OdooClient:
         except Exception as e:
             self.logger.error(f"Erro ao iniciar timer para tarefa {task_id}: {e}")
             raise
+
+    def get_development_stage_id(self, project_id: int) -> Optional[int]:
+        """
+        Tenta localizar o estágio 'desenvolvimento' (ou equivalente) para um projeto.
+
+        Procura por estágios cujo nome contenha palavras-chave como
+        'desenvolv', 'desenvolvimento', 'development', 'dev'. Retorna o primeiro
+        stage_id encontrado (int) ou None se não achar.
+        """
+        Stage = self.env["project.task.type"]
+        keywords = ["desenvolv", "desenvolvimento", "development", "dev"]
+
+        # Pesquisa por nome aproximado no contexto do projeto
+        for kw in keywords:
+            domain = [("name", "ilike", kw), ("project_ids", "in", [project_id])]
+            stages = Stage.search_read(domain, ["id", "name"], limit=1)
+            if stages:
+                return stages[0]["id"]
+
+        # Se não encontrou restringido ao projeto, busca globalmente por keyword
+        for kw in keywords:
+            domain = [("name", "ilike", kw)]
+            stages = Stage.search_read(domain, ["id", "name"], limit=1)
+            if stages:
+                return stages[0]["id"]
+
+        return None
 
     def stop_ai_task_timer(self, timesheet_id: int) -> bool:
         """
@@ -504,3 +547,19 @@ class OdooClient:
             )
 
         return {"task": task, "parent": parent, "children": children}
+
+    def get_child_tasks(
+        self, parent_task_id: int, fields: Optional[List[str]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Retorna as tarefas filhas diretas de uma tarefa pai.
+
+        Args:
+            parent_task_id: ID da tarefa pai
+            fields: lista de campos a serem retornados (None = DEFAULT_TASK_FIELDS)
+
+        Returns:
+            Lista de dicionários com as tarefas filhas
+        """
+        domain = [("parent_id", "=", parent_task_id)]
+        return self.get_tasks(domain=domain, fields=fields)

@@ -52,6 +52,27 @@ DEFAULT_PROJECT_ID=5
 - **Ver estágios:** `odoo-sync task stages`
 - **Mover tarefa:** `odoo-sync task move --task 42 --stage 24`
 
+### Criar / Atualizar Tarefas
+
+- **Criar tarefa (dry-run):**
+  `odoo-sync task create --name "Corrigir bug X" --desc "Reproduzir e corrigir" --project 5 --stage 12 -a 2 -a 3 --dry-run`
+- **Criar tarefa (real):**
+  `odoo-sync task create --name "Implementar feature Y" -p 5 -a 2 -a 3`
+
+- **Atualizar tarefa (ex.: mudar nome/estágio):**
+  `odoo-sync task update --task 42 --name "Novo nome" --stage 5`
+
+- **Desvincular parent_id (remover parent):**
+  `odoo-sync task update --task 42 --clear-parent`
+  ou
+  `odoo-sync task update --task 42 --parent none`
+
+- **Substituir atribuídos (user_ids):**
+  `odoo-sync task update --task 42 -a 2 -a 3`
+
+- **Remover todos os atribuídos:**
+  `odoo-sync task update --task 42 --clear-assign`
+
 ### Interação para IAs (Opencode, Claude, etc)
 - **Ligar timer:** `odoo-sync timer start --task 42 --desc "Criando botão" --model "opencode"`
 - **Desligar timer:** `odoo-sync timer stop --id 15`
