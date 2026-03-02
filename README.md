@@ -1,76 +1,88 @@
-# 🔄 Odoo Task Sync - Sincronização Bidirecional com Agentes IA
+# 🔄 Odoo Task Sync - CLI Stateless para Agentes IA
 
-Sistema de sincronização entre **Odoo 18** e arquivos **JSON locais**, permitindo que agentes de IA processem, analisem e sugiram melhorias em tarefas de projetos.
+Ferramenta CLI para gerenciar tarefas do **Odoo 18** diretamente via RPC, permitindo que agentes de IA trabalhem de forma autônoma com timesheets, movimentação de tarefas e criação/atualização de conteúdo.
 
 ## 📋 Visão Geral
 
-Este projeto resolve o desafio de:
-- ✅ Baixar tarefas e subtarefas do Odoo para análise offline
-- ✅ Permitir que múltiplos agentes de IA processem as tarefas
-- ✅ Gerar sugestões automatizadas (priorização, subtarefas, descrições, etc.)
-- ✅ Sincronizar mudanças aprovadas de volta para o Odoo
-- ✅ Manter gerentes de projeto sempre atualizados
+Sistema **stateless** (sem persistência local) que conecta diretamente ao Odoo para:
+- ✅ Consultar tarefas ao vivo (sem cache local JSON)
+- ✅ Gerenciar timesheets automáticos para múltiplos agentes de IA
+- ✅ Mover tarefas entre estágios
+- ✅ Criar/atualizar/deletar tarefas via CLI
+- ✅ Suporte a hierarquia de tarefas (parent/children)
+- ✅ Cache em memória (5min TTL) para performance
+- ✅ Idioma: **Português (pt-BR)** obrigatório
 
 ## 🏗️ Arquitetura
 
 ```
-┌─────────────┐    sync     ┌──────────────┐
-│             │◄───────────►│              │
-│  ODOO 18    │             │  JSON Files  │
-│  (VPS)      │             │  (Local)     │
-│             │             │              │
-└──────┬──────┘             └──────┬───────┘
-       │ OdooRPC API                │ File I/O
-       │                            │
-┌──────▼────────────────────────────▼───────┐
-│                                            │
-│        SYNC ENGINE (Python)                │
-│  • Download/Upload de tarefas             │
-│  • Detecção de conflitos                  │
-│  • Versionamento                           │
-│                                            │
-└───────────────────┬────────────────────────┘
-                    │
-┌───────────────────▼───────────────────────┐
-│                                            │
-│        AI AGENT INTERFACE                 │
-│  • Claude, GPT-4, ou agentes customizados │
-│  • Análise e sugestões                    │
-│  • Aprovação interativa                   │
-│                                            │
-└────────────────────────────────────────────┘
+┌─────────────┐
+│             │
+│  ODOO 18    │◄────── Único Source of Truth
+│  (VPS)      │
+│             │
+└──────┬──────┘
+       │ OdooRPC API (stateless)
+       │
+┌──────▼────────────────────┐
+│                            │
+│   odoo-sync CLI            │
+│   • Cache em memória 5min  │
+│   • Timers multi-agente    │
+│   • CRUD de tarefas        │
+│                            │
+└───────────────┬────────────┘
+                │
+┌───────────────▼───────────────┐
+│                                │
+│      AI AGENTS                │
+│  • Claude, GPT-4, etc.        │
+│  • Leem tarefas via CLI       │
+│  • Gerenciam timers           │
+│  • Movem estágios             │
+│                                │
+└────────────────────────────────┘
 ```
 
-## 🚀 Início Rápido
+## 🚀 Instalação
 
-### 1. Instalação
+### Via pip (Recomendado)
 
 ```bash
-# Clone ou copie o projeto
-cd odoo-task-sync
+pip install odoo-task-sync
+```
+
+### Via pipx (Isolado)
+
+```bash
+pipx install odoo-task-sync
+```
+
+### Desenvolvimento
+
+```bash
+# Clone o projeto
+cd odoo-sync
 
 # Crie ambiente virtual
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
-# ou
-venv\Scripts\activate  # Windows
+# ou venv\Scripts\activate  # Windows
 
-# Instale dependências
-pip install -r requirements.txt
+# Instale em modo de desenvolvimento
+pip install -e .
 ```
 
-### 2. Configuração
+## ⚙️ Configuração
 
-Copie o arquivo de exemplo e configure:
+### 1. Configuração Global (~/.config/odoo-sync/.env)
+
+Crie o diretório e arquivo:
 
 ```bash
-cp .env.example .env
-```
-
-Edite `.env` com suas credenciais:
-
-```env
-# Odoo Configuration
+mkdir -p ~/.config/odoo-sync
+cat > ~/.config/odoo-sync/.env << 'EOF'
+# Credenciais Odoo (global)
 ODOO_HOST=seu-odoo.com
 ODOO_PORT=443
 ODOO_PROTOCOL=jsonrpc+ssl
@@ -78,493 +90,333 @@ ODOO_DB=odoo
 ODOO_USER=seu.email@exemplo.com
 ODOO_PASSWORD=sua_senha
 
-# AI API Keys (opcional)
-ANTHROPIC_API_KEY=sk-ant-xxx
-OPENAI_API_KEY=sk-xxx
+# Pool de Agentes de IA (IDs de hr.employee)
+AI_AGENT_IDS=2,3,4
+EOF
 ```
 
-### 3. Teste de Conexão
+### 2. Configuração por Projeto (Opcional)
+
+Em qualquer projeto que use `odoo-sync`:
 
 ```bash
-# Baixar suas tarefas
-python scripts/sync_pull.py
-
-# Visualizar resultado
-cat data/tasks/user_*_all_tasks.json | jq .
+# Inicializar projeto local
+odoo-sync init
 ```
 
-## 📖 Uso Detalhado
+Isso cria:
+- `.odoo-sync.env` — config local (sobrescreve global)
+- `.odoo-agent-rules/main.md` — regras do agente (copiado de AI_SYSTEM_PROMPT.md)
+- `.odoo-agent-rules/specs.md` — especificação HTML para descrições
+- `data/tasks/` — diretório vazio (não mais usado, pode ser ignorado)
 
-### Baixar Tarefas (Pull)
+Edite `.odoo-sync.env` para definir projeto padrão:
+
+```env
+# ID do projeto padrão deste repositório
+DEFAULT_PROJECT_ID=5
+
+# (Opcional) Sobrescrever credenciais globais
+# ODOO_HOST=outro-odoo.com
+# AI_AGENT_IDS=5,6
+```
+
+## 📖 Comandos Principais
+
+### Consulta de Tarefas (Stateless)
 
 ```bash
-# Todas as suas tarefas
-python scripts/sync_pull.py
+# Ver detalhes completos de uma tarefa
+odoo-sync task show --task 123
+odoo-sync task show --task 123 --json  # Saída em JSON
 
-# Tarefas de um projeto específico
-python scripts/sync_pull.py --project 1
+# Listar tarefas de um projeto
+odoo-sync task list --project 5
 
-# Tarefas de outro usuário (requer permissões)
-python scripts/sync_pull.py --project 1 --user 2
+# Listar com filtros
+odoo-sync task list --project 5 --stage 10 --limit 20
+odoo-sync task list --user 2  # Tarefas atribuídas ao usuário ID 2
 
-# Incluir tarefas completadas
-python scripts/sync_pull.py --include-completed
+# Ver subtarefas
+odoo-sync task children --task 100
+
+# Listar estágios disponíveis
+odoo-sync task stages
+odoo-sync task stages --project 5
 ```
 
-**Resultado**: Arquivo JSON em `data/tasks/`
-
-### Processar com IA
-
-#### Opção 1: Usando a Interface Python
-
-```python
-from pathlib import Path
-from src.ai.agent_interface import AIAgentInterface
-
-# Carregar tarefas
-interface = AIAgentInterface(Path('data/tasks/project_1_tasks.json'))
-
-# Obter resumo para IA
-summary = interface.get_tasks_summary(format='markdown')
-print(summary)
-
-# Obter estatísticas
-stats = interface.get_statistics()
-print(f"Tarefas atrasadas: {stats['tasks_overdue']}")
-print(f"Sem descrição: {stats['tasks_empty_description']}")
-
-# Exportar para prompt de IA
-prompt_data = interface.export_for_ai_prompt()
-# Envie prompt_data para Claude, GPT-4, etc.
-```
-
-#### Opção 2: Usando Claude/GPT Diretamente
-
-```python
-import anthropic
-from pathlib import Path
-from src.ai.agent_interface import AIAgentInterface
-
-# Preparar dados
-interface = AIAgentInterface(Path('data/tasks/project_1_tasks.json'))
-tasks_data = interface.export_for_ai_prompt()
-
-# Enviar para Claude
-client = anthropic.Anthropic(api_key="your-key")
-
-message = client.messages.create(
-    model="claude-sonnet-4-20250514",
-    max_tokens=4096,
-    messages=[{
-        "role": "user",
-        "content": f"""
-        Analise estas tarefas e forneça sugestões para:
-        1. Reorganizar prioridades
-        2. Criar subtarefas necessárias
-        3. Melhorar descrições vazias
-        4. Identificar riscos de atraso
-        
-        {tasks_data}
-        
-        Retorne em formato JSON com estrutura:
-        {{
-          "suggestions": [
-            {{
-              "task_id": 42,
-              "type": "update_priority",
-              "changes": {{"priority": "2"}},
-              "reasoning": "..."
-            }}
-          ]
-        }}
-        """
-    }]
-)
-
-# Processar resposta
-suggestions = extract_suggestions_from_ai(message.content)
-
-# Salvar sugestões
-interface.save_suggestions(suggestions, agent_name="claude-sonnet-4")
-```
-
-### Revisar e Aprovar Sugestões
-
-```python
-import json
-from pathlib import Path
-
-# Carregar sugestões
-with open('data/ai_workspace/suggestions_20260228_120000.json') as f:
-    data = json.load(f)
-
-# Revisar e aprovar interativamente
-approved_changes = []
-
-for suggestion in data['suggestions']:
-    print(f"\n{'='*60}")
-    print(f"Tarefa: [{suggestion['task_id']}] {suggestion['task_name']}")
-    print(f"Tipo: {suggestion['type']}")
-    print(f"Sugestão: {suggestion['suggestion']}")
-    print(f"Justificativa: {suggestion['reasoning']}")
-    print(f"Confiança: {suggestion['confidence']*100:.0f}%")
-    
-    choice = input("\n[A]provar / [R]ejeitar / [E]ditar / [P]ular? ").lower()
-    
-    if choice == 'a':
-        suggestion['approved'] = True
-        suggestion['reviewed_by'] = 'Você'
-        suggestion['reviewed_at'] = datetime.now().isoformat()
-        approved_changes.append(suggestion)
-
-# Salvar mudanças aprovadas
-with open('data/ai_workspace/approved_changes.json', 'w') as f:
-    json.dump({
-        'metadata': {'total': len(approved_changes)},
-        'changes': approved_changes
-    }, f, indent=2)
-```
-
-### Enviar Mudanças para Odoo (Push)
+### Timers (Timesheets)
 
 ```bash
-# Aplicar mudanças aprovadas
-python scripts/sync_push.py data/ai_workspace/approved_changes.json
+# Iniciar cronômetro (automático: busca tarefa + move para "Desenvolvimento" + cria timesheet)
+odoo-sync timer start --task 123 --desc "Implementar endpoint de autenticação" --model "claude-sonnet"
+# Saída:
+# ✓ Cronômetro iniciado!
+# Timer ID: 456
+# Agente alocado: AI Agent 1
 
-# Apenas validar (dry-run)
-python scripts/sync_push.py data/ai_workspace/approved_changes.json --dry-run
+# Parar cronômetro
+odoo-sync timer stop --id 456
 ```
 
-## 📁 Estrutura de Arquivos
+**O que acontece ao iniciar timer:**
+1. Busca a tarefa no Odoo (valida que existe)
+2. Tenta mover para estágio "Desenvolvimento" (busca por keywords: desenvolv, development, dev)
+3. Aloca um agente disponível do pool `AI_AGENT_IDS`
+4. Cria timesheet (`account.analytic.line`) com `unit_amount=0` (timer aberto)
+5. Retorna `timer_id` para você parar depois
 
-```
-odoo-task-sync/
-├── config/                      # Configurações
-├── data/
-│   ├── tasks/                   # Tarefas sincronizadas
-│   │   ├── project_1_tasks.json
-│   │   └── user_2_all_tasks.json
-│   ├── metadata/                # Metadados de sync
-│   │   ├── sync_state.json
-│   │   └── conflicts.json
-│   └── ai_workspace/            # Área de trabalho IA
-│       ├── suggestions.json
-│       └── approved_changes.json
-├── src/
-│   ├── sync/
-│   │   ├── odoo_client.py       # Cliente Odoo (OdooRPC)
-│   │   └── sync_manager.py      # Gerenciador de sync
-│   ├── ai/
-│   │   └── agent_interface.py   # Interface para IAs
-│   └── models/
-│       └── task.py              # Modelos de dados
-├── scripts/
-│   ├── sync_pull.py             # Script: baixar tarefas
-│   └── sync_push.py             # Script: enviar mudanças
-├── requirements.txt
-├── .env.example
-└── README.md
-```
-
-## 🔧 Formato JSON das Tarefas
-
-### Arquivo de Tarefas (`data/tasks/project_X_tasks.json`)
-
-```json
-{
-  "metadata": {
-    "project_id": 1,
-    "project_name": "Projeto CMS - Odoo",
-    "last_sync": "2026-02-28T15:30:00Z",
-    "total_tasks": 15
-  },
-  "tasks": [
-    {
-      "id": 42,
-      "name": "Implementar autenticação OAuth",
-      "description": "<p>Implementar OAuth2...</p>",
-      "description_plain": "Implementar OAuth2...",
-      
-      "project": {
-        "id": 1,
-        "name": "Projeto CMS - Odoo"
-      },
-      
-      "hierarchy": {
-        "parent_id": null,
-        "child_ids": [43, 44],
-        "child_count": 2,
-        "is_subtask": false
-      },
-      
-      "assignment": {
-        "user_ids": [2, 3],
-        "user_names": ["João Silva", "Maria Santos"]
-      },
-      
-      "status": {
-        "stage_id": 3,
-        "stage_name": "Em Progresso",
-        "priority": "1",
-        "priority_label": "Alta"
-      },
-      
-      "dates": {
-        "date_deadline": "2026-03-15",
-        "create_date": "2026-02-27T16:45:00Z",
-        "write_date": "2026-02-28T14:00:00Z"
-      },
-      
-      "time_tracking": {
-        "planned_hours": 40.0,
-        "effective_hours": 15.5,
-        "remaining_hours": 24.5,
-        "progress_percent": 38.75
-      },
-      
-      "sync_metadata": {
-        "last_sync_from_odoo": "2026-02-28T15:30:00Z",
-        "odoo_write_date": "2026-02-28T14:00:00Z",
-        "checksum": "abc123"
-      }
-    }
-  ]
-}
-```
-
-## 🤖 Exemplos de Sugestões de IA
-
-### 1. Criar Subtarefa
-
-```json
-{
-  "suggestion_id": "S001",
-  "task_id": 42,
-  "type": "create_subtask",
-  "confidence": 0.95,
-  "suggestion": {
-    "action": "create",
-    "parent_id": 42,
-    "values": {
-      "name": "Implementar testes unitários OAuth",
-      "description": "Criar testes para cobrir fluxos OAuth2",
-      "user_ids": [2],
-      "planned_hours": 4.0
-    }
-  },
-  "reasoning": "A tarefa principal não possui subtarefa para testes..."
-}
-```
-
-### 2. Atualizar Prioridade
-
-```json
-{
-  "suggestion_id": "S002",
-  "task_id": 42,
-  "type": "update_priority",
-  "confidence": 0.87,
-  "suggestion": {
-    "action": "update",
-    "task_id": 42,
-    "changes": {"priority": "2"},
-    "previous_values": {"priority": "1"}
-  },
-  "reasoning": "Tarefa atrasada (38% progresso, 60% do prazo expirado)"
-}
-```
-
-### Atualizar uma tarefa (CLI)
-
-Você pode atualizar campos de tarefas diretamente com a CLI `odoo-sync`.
-
-Exemplos:
+### Gerenciamento de Tarefas
 
 ```bash
-# Mudar nome e estágio
-odoo-sync task update --task 42 --name "Revisar OAuth" --stage 3
+# Criar tarefa
+odoo-sync task create --name "Implementar login OAuth" --desc "Descrição em Português" -p 5 -a 2
 
-# Desvincular parent_id (remover vínculo de pai)
-odoo-sync task update --task 42 --clear-parent
+# Atualizar tarefa
+odoo-sync task update --task 123 --name "Novo nome"
+odoo-sync task update --task 123 --stage 15
+odoo-sync task update --task 123 --desc "$(cat docs/task-123.html)"  # Enviar HTML de arquivo
 
-# Substituir usuários atribuídos
-odoo-sync task update --task 42 -a 2 -a 3
+# Mover tarefa de estágio
+odoo-sync task move --task 123 --stage 20
 
-# Remover todos os usuários atribuídos
-odoo-sync task update --task 42 --clear-assign
+# Deletar tarefa
+odoo-sync task delete --task 123
+odoo-sync task delete --task 123 --yes  # Sem confirmação
+
+# Importar múltiplas tarefas de JSON
+odoo-sync task import --file tasks.json
 ```
 
-### 3. Melhorar Descrição
+### Utilitários
 
-```json
-{
-  "suggestion_id": "S003",
-  "task_id": 43,
-  "type": "update_description",
-  "confidence": 0.72,
-  "suggestion": {
-    "action": "update",
-    "task_id": 43,
-    "changes": {
-      "description": "<p><strong>Objetivos:</strong>...</p>"
-    }
-  },
-  "reasoning": "Descrição vazia. Adicionando estrutura detalhada..."
+```bash
+# Atualizar regras do agente (.odoo-agent-rules/) a partir do pacote
+odoo-sync update --rules
+odoo-sync update --rules --yes  # Sobrescrever sem perguntar
+
+# Ver documentação de regras HTML
+odoo-sync doc rules
+```
+
+## 🤖 Workflow para Agentes de IA
+
+### 1. Contexto vem da tarefa
+
+Quando um agente recebe um `task_id`, ele deve primeiro buscar o contexto:
+
+```bash
+odoo-sync task show --task 123
+```
+
+Isso retorna:
+- Nome e descrição completa (HTML com contexto do que fazer)
+- Estágio atual
+- Projeto
+- Prazo, horas, atribuições, parent/children
+
+### 2. Iniciar Timer
+
+Antes de qualquer trabalho:
+
+```bash
+odoo-sync timer start --task 123 --desc "Implementar endpoint de login" --model "claude"
+# Guarde o Timer ID retornado!
+```
+
+### 3. Executar Trabalho
+
+Fazer edições de código, testes, commits, etc.
+
+### 4. Parar Timer
+
+Ao terminar:
+
+```bash
+odoo-sync timer stop --id <TIMER_ID>
+```
+
+### 5. Mover Estágio (se concluído)
+
+Se a tarefa está 100% pronta:
+
+```bash
+odoo-sync task stages  # Ver estágios
+odoo-sync task move --task 123 --stage 20  # Mover para "Concluído"
+```
+
+## 📝 Formato de Descrições (HTML)
+
+Ao criar/atualizar descrições, use o template canônico:
+
+```html
+<h3>Contexto</h3>
+<p>Breve descrição do que a feature faz.</p>
+
+<h3>Regras de Negócio</h3>
+<ul>
+  <li>Regra 1: apenas administradores podem...</li>
+  <li>Regra 2: campo X é obrigatório</li>
+</ul>
+
+<h3>Critérios de Aceitação</h3>
+<ul class="o_checklist">
+  <li><label><input type="checkbox" disabled> Model criado com migration</label></li>
+  <li><label><input type="checkbox" disabled> Testes implementados</label></li>
+</ul>
+
+<h3>Request/Response Exemplo</h3>
+<pre><code>{
+  "method": "POST",
+  "path": "/api/login"
 }
+</code></pre>
 ```
 
-## ⚙️ Configuração Avançada
+**Tags permitidas:** `h1, h2, h3, p, ul, ol, li, pre, code, strong, em, a, blockquote`
 
-### Filtros Personalizados
+**Tags proibidas:** `script, style, iframe, form` (checkboxes apenas visuais em checklists)
 
+**Limite:** < 64 KB
+
+**Enviando descrições longas:**
+```bash
+# Criar HTML local primeiro
+odoo-sync task update --task 123 --desc "$(cat docs/task-123.html)"
+```
+
+Ver especificação completa:
+```bash
+odoo-sync doc rules
+```
+
+## 🔧 Configuração Avançada
+
+### Pool de Agentes de IA
+
+Configure IDs de funcionários (`hr.employee`) que representam agentes:
+
+```env
+# Global: ~/.config/odoo-sync/.env
+AI_AGENT_IDS=2,3,4
+
+# Ou sobrescrever por projeto: .odoo-sync.env
+AI_AGENT_IDS=5,6,7
+```
+
+Quando `timer start` é executado, o sistema:
+1. Busca agentes livres (sem timers abertos `unit_amount=0`)
+2. Aloca o primeiro disponível
+3. Retorna erro se todos estiverem ocupados
+
+### Precedência de Configuração
+
+```
+1. Projeto local (.odoo-sync.env)
+2. Global (~/.config/odoo-sync/.env)
+3. Fallback (source .env no repo, apenas dev)
+```
+
+### Cache em Memória
+
+O `OdooClient` mantém cache de 5 minutos para:
+- Tarefas consultadas via `get_task_by_id()`
+- Cache é invalidado automaticamente após `update_task()` ou `delete_task()`
+- Cache é descartado quando o comando CLI termina
+
+Desabilitar cache em uma chamada específica:
 ```python
-from src.sync.odoo_client import OdooClient
-
-client = OdooClient(...)
-
-# Tarefas urgentes e atrasadas
-urgent_overdue = client.get_tasks(
-    domain=[
-        '&',
-        ('priority', '=', '2'),
-        ('date_deadline', '<', '2026-02-28')
-    ]
-)
-
-# Tarefas sem responsável em projetos ativos
-unassigned = client.get_tasks(
-    domain=[
-        '&',
-        ('user_ids', '=', False),
-        ('project_id.active', '=', True)
-    ]
-)
-
-# Busca por texto
-api_tasks = client.search_tasks('API', project_id=1)
-```
-
-### Detecção de Conflitos
-
-O sistema detecta automaticamente quando:
-- Uma tarefa foi modificada no Odoo após o último sync
-- Mudanças locais conflitam com mudanças no servidor
-
-```json
-{
-  "conflicts": [
-    {
-      "task_id": 42,
-      "local_version": {
-        "write_date": "2026-02-28T16:00:00Z",
-        "changes": {"priority": "2"}
-      },
-      "odoo_version": {
-        "write_date": "2026-02-28T16:15:00Z",
-        "changes": {"stage_id": 4}
-      },
-      "resolution_options": [
-        "keep_odoo",
-        "keep_local",
-        "merge"
-      ]
-    }
-  ]
-}
+client.get_task_by_id(123, use_cache=False)
 ```
 
 ## 🛠️ Desenvolvimento
 
-### Executar Testes
+### Estrutura do Projeto
+
+```
+odoo-sync/
+├── src/
+│   ├── cli/
+│   │   ├── main.py         # CLI principal (comandos)
+│   │   └── importer.py     # Importador JSON
+│   └── sync/
+│       └── odoo_client.py  # Cliente RPC + cache
+├── docs/
+│   └── task-html-spec.md   # Spec de HTML
+├── AI_SYSTEM_PROMPT.md     # Regras do agente (source)
+├── pyproject.toml          # Packaging
+└── README.md               # Este arquivo
+```
+
+### Rodar Testes
 
 ```bash
 pytest tests/
 ```
 
-### Logging
-
-Logs são salvos em `logs/`:
-- `sync_pull.log` - Logs de download
-- `sync_push.log` - Logs de upload
-- `odoo_sync.log` - Logs gerais
-
-### Contribuir
+### Contribuindo
 
 1. Fork o projeto
-2. Crie uma branch para sua feature
-3. Faça commit das mudanças
-4. Push para a branch
-5. Abra um Pull Request
+2. Crie branch para feature (`git checkout -b feature/nova-feature`)
+3. Commit mudanças (`git commit -m 'feat: adiciona nova feature'`)
+4. Push para branch (`git push origin feature/nova-feature`)
+5. Abra Pull Request
 
-## 📚 Recursos Adicionais
+## 📚 Documentação Adicional
 
-### Documentação Odoo
-- [Odoo 18 External API](https://www.odoo.com/documentation/18.0/developer/reference/external_api.html)
-- [OdooRPC Documentation](https://github.com/OCA/odoorpc)
-
-### IAs Suportadas
-- **Claude (Anthropic)**: Melhor para análise contextual e raciocínio
-- **GPT-4 (OpenAI)**: Excelente para geração de conteúdo
-- **Agentes customizados**: Use a AIAgentInterface para integrar qualquer IA
+- **AI_SYSTEM_PROMPT.md** — Regras completas para agentes de IA
+- **docs/task-html-spec.md** — Especificação canônica de HTML para descrições
+- **.odoo-agent-rules/** — Gerado por `odoo-sync init`, regras locais do projeto
 
 ## ❓ FAQ
 
-**P: Preciso instalar algo no Odoo?**  
-R: Não! O sistema usa apenas a API externa do Odoo.
+### Por que stateless? E os arquivos JSON?
 
-**P: Os dados ficam seguros?**  
-R: Sim! Os arquivos JSON ficam apenas na sua máquina local. Use `.gitignore` para não commitar dados sensíveis.
+Anteriormente, `odoo-sync` baixava tarefas para `data/tasks/*.json` localmente. Essa abordagem foi **removida** porque:
+- Agentes precisam conectar ao Odoo de qualquer forma (timers, stage moves)
+- Odoo RPC é rápido o suficiente para queries individuais
+- Elimina problemas de sincronização e conflitos
+- Reduz ~70% do código
 
-**P: Posso usar sem IA?**  
-R: Sim! Use apenas os scripts de sync para ter backup local das tarefas em JSON.
+Agora: **Odoo é a única fonte de verdade**. Queries vão direto ao servidor.
 
-**P: Funciona com Odoo Community Edition?**  
-R: Sim! Funciona com Community e Enterprise.
+### Como funciona o cache?
 
-**P: Como atualizar para nova versão do Odoo?**  
-R: Atualize o `odoorpc` e teste a compatibilidade.
+Cache em memória (Python dict) com TTL de 5 minutos, apenas durante execução do comando:
+- 1ª chamada `get_task_by_id(123)` → busca do Odoo, cacheia
+- 2ª chamada `get_task_by_id(123)` → retorna do cache (se < 5min)
+- Comando termina → cache descartado
+
+Invalidação automática após `update_task()` ou `delete_task()`.
+
+### Múltiplos agentes podem rodar simultaneamente?
+
+Sim! Cada agente:
+1. Conecta ao Odoo independentemente
+2. Usa `timer start` para alocar um employee do pool
+3. Se todos agentes estão ocupados, retorna erro
+
+### Como adicionar novos agentes?
+
+No Odoo:
+1. Criar funcionário (`hr.employee`) com nome "AI Agent X"
+2. Anotar o ID do funcionário
+3. Adicionar ID em `AI_AGENT_IDS=2,3,4,5`
+
+### Posso usar em projetos não-Odoo?
+
+Não. `odoo-sync` é específico para Odoo 18+ via OdooRPC. Para outros sistemas, adapte o `odoo_client.py`.
 
 ## 📄 Licença
 
-MIT License - Sinta-se livre para usar e modificar.
+MIT
 
-## 🙏 Créditos
+## 👤 Autor
 
-- **OdooRPC**: https://github.com/OCA/odoorpc
-- **Odoo Community Association (OCA)**: https://odoo-community.org/
+**Alan Lemos**  
+Email: amdlemos@gmail.com
 
 ---
 
-**Desenvolvido com ❤️ para integração Odoo + IA**
-
-Para dúvidas ou sugestões, abra uma issue!
-### Gestão de Timesheet com Agentes (Multi-Agent)
-
-O sistema suporta múltiplos agentes trabalhando simultaneamente nas tarefas sem haver colapso ou sobreposição de horas. Para utilizar:
-
-1. Crie os agentes no Odoo como Empregados (Employees).
-2. Configure o seu usuário como Gerente (`Manager`) de cada agente para que as horas caiam nos seus relatórios.
-3. Obtenha os IDs numéricos dos Agentes no Odoo (ex: 2, 3, 4).
-4. Configure no seu arquivo `.env`:
-
-```env
-# AI Agent Configuration
-AI_AGENT_IDS=2,3,4
-```
-
-Quando um agente precisar iniciar um trabalho, o sistema procurará automaticamente qual agente está livre e atrelará a linha de Timesheet (Timer) a esse agente livre.
-
-```python
-# Iniciar trabalho
-res = client.start_ai_task_timer(
-    task_id=5, 
-    description="Implementando testes de API", 
-    llm_model="claude-3.5-sonnet"
-)
-print(f"Agente alocado: {res['agent_name']} | Timer ID: {res['timer_id']}")
-
-# O agente faz o seu processamento...
-
-# Parar o tempo
-client.stop_ai_task_timer(res['timer_id'])
-```
+**Versão:** 0.1.0 (Stateless)  
+**Última atualização:** 2026-03-01

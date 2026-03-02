@@ -12,7 +12,6 @@ from rich.console import Console
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.sync.odoo_client import OdooClient
-from src.sync.sync_manager import SyncManager
 from src.cli.importer import load_tasks_from_file, normalize_task_payload
 
 console = Console()
@@ -184,34 +183,6 @@ def init(migrate):
             console.print(f"[green]✓ Criado .gitignore e adicionado {entry}[/green]")
 
 
-@cli.command()
-@click.option("--project", "-p", type=int, help="ID do projeto")
-@click.option(
-    "--user", "-u", type=int, help="ID do usuário (padrão: usuário autenticado)"
-)
-@click.option("--include-completed", is_flag=True, help="Incluir tarefas completadas")
-def pull(project, user, include_completed):
-    """Baixar tarefas do Odoo para arquivo JSON local"""
-    load_config()
-
-    # Use env defaults if not provided via CLI
-    if not project and os.getenv("DEFAULT_PROJECT_ID"):
-        try:
-            project = int(os.getenv("DEFAULT_PROJECT_ID"))
-        except ValueError:
-            pass
-
-    client = get_client()
-    data_dir = Path.cwd() / "data"
-    sync_manager = SyncManager(client, data_dir)
-
-    console.print("[yellow]Baixando tarefas...[/yellow]")
-    filepath = sync_manager.pull_tasks(
-        project_id=project, user_id=user, include_completed=include_completed
-    )
-    console.print(f"[green]✓ Tarefas salvas em:[/green] [cyan]{filepath}[/cyan]")
-
-
 @cli.group()
 def timer():
     """Gerenciar cronômetros de tarefas (Timesheet)"""
@@ -380,6 +351,152 @@ def list_stages(project):
     console.print("\n[bold]Estágios Disponíveis:[/bold]")
     for stage in stages:
         console.print(f"[{stage['id']}] {stage['name']}")
+
+
+@task.command(name="show")
+@click.option("--task", "-t", required=True, type=int, help="ID da tarefa")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Saída em formato JSON")
+def task_show(task, output_json):
+    """Mostrar detalhes completos de uma tarefa (busca ao vivo no Odoo)"""
+    client = get_client()
+
+    try:
+        task_data = client.get_task_by_id(task)
+    except Exception as e:
+        console.print(f"[red]❌ Erro ao buscar tarefa: {e}[/red]")
+        sys.exit(1)
+
+    if not task_data:
+        console.print(f"[red]❌ Tarefa {task} não encontrada.[/red]")
+        sys.exit(1)
+
+    if output_json:
+        console.print(json.dumps(task_data, indent=2, ensure_ascii=False, default=str))
+        return
+
+    # Pretty print
+    console.print(f"\n[bold cyan]Tarefa #{task_data['id']}[/bold cyan]")
+    console.print(f"[bold]{task_data['name']}[/bold]\n")
+
+    # Projeto
+    if task_data.get("project_id"):
+        project_name = (
+            task_data["project_id"][1]
+            if isinstance(task_data["project_id"], (list, tuple))
+            else task_data["project_id"]
+        )
+        console.print(f"📁 Projeto: {project_name}")
+
+    # Stage
+    if task_data.get("stage_id"):
+        stage_name = (
+            task_data["stage_id"][1]
+            if isinstance(task_data["stage_id"], (list, tuple))
+            else task_data["stage_id"]
+        )
+        console.print(f"📊 Estágio: {stage_name}")
+
+    # Atribuídos
+    if task_data.get("user_ids"):
+        console.print(f"👥 Atribuído a: {len(task_data['user_ids'])} usuário(s)")
+
+    # Datas
+    if task_data.get("date_deadline"):
+        console.print(f"📅 Prazo: {task_data['date_deadline']}")
+
+    # Horas
+    allocated = task_data.get("allocated_hours", 0.0)
+    effective = task_data.get("effective_hours", 0.0)
+    remaining = task_data.get("remaining_hours", 0.0)
+    if allocated > 0 or effective > 0:
+        console.print(
+            f"⏱️  Horas: {effective:.1f}h / {allocated:.1f}h (restante: {remaining:.1f}h)"
+        )
+
+    # Parent/Children
+    if task_data.get("parent_id"):
+        parent_name = (
+            task_data["parent_id"][1]
+            if isinstance(task_data["parent_id"], (list, tuple))
+            else f"ID {task_data['parent_id']}"
+        )
+        console.print(f"⬆️  Tarefa pai: {parent_name}")
+
+    if task_data.get("child_ids"):
+        console.print(f"⬇️  Subtarefas: {len(task_data['child_ids'])}")
+
+    # Descrição
+    description = task_data.get("description") or ""
+    if description:
+        console.print(f"\n[bold]Descrição:[/bold]")
+        # Remove HTML tags simplificadamente
+        import re
+
+        plain = re.sub("<[^<]+?>", "", description)
+        plain = (
+            plain.replace("&nbsp;", " ")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+        )
+        console.print(plain.strip()[:500] + ("..." if len(plain) > 500 else ""))
+
+
+@task.command(name="list")
+@click.option("--project", "-p", type=int, help="Filtrar por ID do projeto")
+@click.option("--stage", "-s", type=int, help="Filtrar por ID do estágio")
+@click.option("--user", "-u", type=int, help="Filtrar por usuário atribuído")
+@click.option("--limit", "-l", default=50, help="Limite de resultados (padrão: 50)")
+@click.option("--json", "-j", "output_json", is_flag=True, help="Saída em formato JSON")
+def task_list(project, stage, user, limit, output_json):
+    """Listar tarefas (query ao vivo no Odoo)"""
+    load_config()
+    client = get_client()
+
+    # Construir domain
+    domain = []
+    if project:
+        domain.append(("project_id", "=", project))
+    if stage:
+        domain.append(("stage_id", "=", stage))
+    if user:
+        domain.append(("user_ids", "in", [user]))
+
+    # Se nenhum filtro, usar projeto padrão do .env
+    if not domain and os.getenv("DEFAULT_PROJECT_ID"):
+        try:
+            default_project = int(os.getenv("DEFAULT_PROJECT_ID"))
+            domain.append(("project_id", "=", default_project))
+            console.print(f"[yellow]Usando projeto padrão: {default_project}[/yellow]")
+        except ValueError:
+            pass
+
+    try:
+        tasks = client.get_tasks(domain=domain, limit=limit)
+    except Exception as e:
+        console.print(f"[red]❌ Erro ao listar tarefas: {e}[/red]")
+        sys.exit(1)
+
+    if not tasks:
+        console.print("[yellow]Nenhuma tarefa encontrada.[/yellow]")
+        return
+
+    if output_json:
+        console.print(json.dumps(tasks, indent=2, ensure_ascii=False, default=str))
+        return
+
+    # Pretty print
+    console.print(f"\n[bold]Encontradas {len(tasks)} tarefa(s):[/bold]\n")
+    for t in tasks:
+        tid = t.get("id")
+        name = t.get("name") or t.get("display_name") or "<sem nome>"
+        stage = t.get("stage_id")
+        stage_name = (
+            stage[1] if isinstance(stage, (list, tuple)) and len(stage) > 1 else "?"
+        )
+
+        console.print(f"[cyan][{tid}][/cyan] {name}")
+        console.print(f"  └─ Estágio: {stage_name}\n")
 
 
 @task.command(name="children")

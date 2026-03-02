@@ -6,11 +6,11 @@ Responsável por autenticação e operações CRUD em tarefas.
 import odoorpc
 from typing import List, Dict, Any, Optional
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 class OdooClient:
-    """Cliente para comunicação com Odoo via RPC"""
+    """Cliente para comunicação com Odoo via RPC (stateless com cache em memória)"""
 
     DEFAULT_TASK_FIELDS = [
         # Identificação
@@ -75,6 +75,10 @@ class OdooClient:
         self.db = db
         self.user = user
 
+        # Cache em memória (TTL 5min)
+        self._cache = {}
+        self._cache_ttl = timedelta(minutes=5)
+
         try:
             self.logger.info(
                 f"Conectando ao Odoo em {host}:{port} (protocolo: {protocol})"
@@ -137,20 +141,38 @@ class OdooClient:
             raise
 
     def get_task_by_id(
-        self, task_id: int, fields: Optional[List[str]] = None
+        self, task_id: int, fields: Optional[List[str]] = None, use_cache: bool = True
     ) -> Optional[Dict]:
         """
-        Buscar uma tarefa específica por ID.
+        Buscar uma tarefa específica por ID (com cache em memória).
 
         Args:
             task_id: ID da tarefa
             fields: Campos para retornar
+            use_cache: Se False, sempre busca do Odoo (ignora cache)
 
         Returns:
             Dicionário com dados da tarefa ou None se não encontrada
         """
+        cache_key = f"task_{task_id}_{','.join(fields or self.DEFAULT_TASK_FIELDS)}"
+
+        # Verificar cache
+        if use_cache and cache_key in self._cache:
+            cached_data, cached_time = self._cache[cache_key]
+            if datetime.now() - cached_time < self._cache_ttl:
+                self.logger.debug(f"Cache hit para tarefa {task_id}")
+                return cached_data
+
+        # Buscar do Odoo
         tasks = self.get_tasks(domain=[("id", "=", task_id)], fields=fields, limit=1)
-        return tasks[0] if tasks else None
+        result = tasks[0] if tasks else None
+
+        # Atualizar cache
+        if use_cache and result:
+            self._cache[cache_key] = (result, datetime.now())
+            self.logger.debug(f"Cache atualizado para tarefa {task_id}")
+
+        return result
 
     def get_my_tasks(
         self, include_completed: bool = False, fields: Optional[List[str]] = None
@@ -384,9 +406,28 @@ class OdooClient:
             self.logger.error(f"Erro ao parar timer {timesheet_id}: {e}")
             return False
 
+    def invalidate_cache(self, task_id: Optional[int] = None):
+        """
+        Limpar cache em memória.
+
+        Args:
+            task_id: ID específico para invalidar. Se None, limpa todo o cache.
+        """
+        if task_id:
+            # Remover todas as entradas que começam com task_{task_id}_
+            keys_to_remove = [
+                k for k in self._cache if k.startswith(f"task_{task_id}_")
+            ]
+            for key in keys_to_remove:
+                self._cache.pop(key, None)
+            self.logger.debug(f"Cache invalidado para tarefa {task_id}")
+        else:
+            self._cache.clear()
+            self.logger.debug("Cache completo invalidado")
+
     def update_task(self, task_id: int, values: Dict[str, Any]) -> bool:
         """
-        Atualizar tarefa existente.
+        Atualizar tarefa existente (invalida cache automaticamente).
 
         Args:
             task_id: ID da tarefa
@@ -399,6 +440,7 @@ class OdooClient:
 
         try:
             Task.write([task_id], values)
+            self.invalidate_cache(task_id)  # Limpar cache após update
             self.logger.info(f"Tarefa {task_id} atualizada com sucesso")
             return True
         except Exception as e:
