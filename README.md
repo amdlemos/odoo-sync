@@ -183,9 +183,15 @@ odoo-sync task move --task 123 --stage 20
 # Deletar tarefa
 odoo-sync task delete --task 123
 odoo-sync task delete --task 123 --yes  # Sem confirmação
+```
 
-# Importar múltiplas tarefas de JSON
-odoo-sync task import --file tasks.json
+**Criar múltiplas tarefas:** Para criar um lote de tarefas, chame `task create` múltiplas vezes:
+
+```bash
+# Exemplo: criar 3 tarefas
+odoo-sync task create --name "Tarefa 1" -p 5
+odoo-sync task create --name "Tarefa 2" -p 5
+odoo-sync task create --name "Tarefa 3" -p 5
 ```
 
 ### Utilitários

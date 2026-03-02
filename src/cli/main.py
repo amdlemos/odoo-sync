@@ -12,7 +12,6 @@ from rich.console import Console
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.sync.odoo_client import OdooClient
-from src.cli.importer import load_tasks_from_file, normalize_task_payload
 
 console = Console()
 
@@ -594,50 +593,6 @@ def task_create(name, desc, project, parent, stage, assign, dry_run):
     except Exception as e:
         console.print(f"[red]❌ Erro ao criar tarefa: {e}[/red]")
         sys.exit(1)
-
-
-@task.command(name="import")
-@click.option(
-    "--file", "-f", required=True, help="Caminho para o arquivo JSON a importar"
-)
-@click.option(
-    "--dry-run", is_flag=True, help="Validar apenas e mostrar payloads sem criar"
-)
-def task_import(file, dry_run):
-    """Importar múltiplas tarefas a partir de um JSON local"""
-    load_config()
-
-    try:
-        tasks = load_tasks_from_file(file)
-    except Exception as e:
-        console.print(f"[red]❌ Erro ao ler arquivo: {e}[/red]")
-        sys.exit(1)
-
-    client = None
-    created = []
-    for idx, t in enumerate(tasks, start=1):
-        try:
-            payload = normalize_task_payload(t)
-        except Exception as e:
-            console.print(f"[red]Erro no item {idx}: {e}[/red]")
-            continue
-
-        console.print(f"[yellow]Item {idx} payload:[/yellow] {payload}")
-
-        if dry_run:
-            continue
-
-        if client is None:
-            client = get_client()
-
-        try:
-            task_id = client.create_task(payload)
-            console.print(f"[green]✓ Criada tarefa ID {task_id} (item {idx})[/green]")
-            created.append(task_id)
-        except Exception as e:
-            console.print(f"[red]Falha ao criar item {idx}: {e}[/red]")
-
-    console.print(f"[green]Import finished. Created {len(created)} tasks.[/green]")
 
 
 @task.command(name="update")
