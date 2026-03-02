@@ -25,7 +25,7 @@ Para não precisar digitar a senha do seu Odoo em todo projeto novo que você fo
 mkdir -p ~/.config/odoo-sync
 cp .env ~/.config/odoo-sync/.env
 ```
-*(Lembre-se de preencher corretamente com `admin@uaau.com` e o ID dos agentes nesse `.env` global)*.
+*(Lembre-se de preencher corretamente com `admin@amdlemos.com` e o ID dos agentes nesse `.env` global)*.
 
 ## 3. Uso no Dia a Dia (Em um novo Projeto)
 

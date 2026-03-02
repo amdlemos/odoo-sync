@@ -12,6 +12,13 @@ from rich.console import Console
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.sync.odoo_client import OdooClient
+from src.cli.markdown_parser import (
+    parse_tasks_from_markdown,
+    build_hierarchy,
+    format_task_to_markdown,
+    find_task_by_name,
+    update_markdown_with_ids,
+)
 
 console = Console()
 
@@ -716,6 +723,169 @@ def task_delete(task, yes):
             sys.exit(1)
     except Exception as e:
         console.print(f"[red]❌ Erro ao deletar tarefa: {e}[/red]")
+        sys.exit(1)
+
+
+@task.command(name="export-markdown")
+@click.option("--project", "-p", type=int, required=True, help="ID do projeto")
+@click.option("--output", "-o", help="Arquivo de saída (padrão: tasks-PROJECT_ID.md)")
+@click.option("--include-completed", is_flag=True, help="Incluir tarefas concluídas")
+@click.option("--group-by-stage", is_flag=True, help="Agrupar por estágio")
+def task_export_markdown(project, output, include_completed, group_by_stage):
+    """Exportar tarefas de um projeto para Markdown"""
+    load_config()
+    client = get_client()
+
+    # Buscar tarefas do projeto
+    try:
+        tasks = client.get_project_tasks(
+            project_id=project, include_completed=include_completed
+        )
+    except Exception as e:
+        console.print(f"[red]❌ Erro ao buscar tarefas: {e}[/red]")
+        sys.exit(1)
+
+    if not tasks:
+        console.print("[yellow]Nenhuma tarefa encontrada no projeto.[/yellow]")
+        return
+
+    # Buscar info do projeto
+    projects = client.get_projects([("id", "=", project)])
+    project_name = projects[0]["name"] if projects else f"Projeto {project}"
+
+    # Gerar Markdown
+    output_file = output or f"tasks-{project}.md"
+
+    # Header
+    md_lines = [
+        f"# {project_name}",
+        "",
+        f"**Total de tarefas:** {len(tasks)}",
+        "",
+    ]
+
+    if group_by_stage:
+        # Agrupar por estágio
+        from collections import defaultdict
+
+        by_stage = defaultdict(list)
+
+        for task in tasks:
+            stage = task.get("stage_id")
+            stage_name = (
+                stage[1]
+                if isinstance(stage, (list, tuple)) and len(stage) > 1
+                else "Sem estágio"
+            )
+            by_stage[stage_name].append(task)
+
+        for stage_name, stage_tasks in sorted(by_stage.items()):
+            md_lines.append(f"## {stage_name}")
+            md_lines.append("")
+
+            # Organizar por hierarquia (pais primeiro, depois filhas)
+            parents = [t for t in stage_tasks if not t.get("parent_id")]
+
+            for task in parents:
+                # Tarefa pai
+                completed = (
+                    task.get("stage_id")
+                    and "conclu" in str(task.get("stage_id")[1]).lower()
+                    if isinstance(task.get("stage_id"), (list, tuple))
+                    else False
+                )
+                md_task = format_task_to_markdown(
+                    task_name=task["name"],
+                    odoo_id=task["id"],
+                    completed=completed,
+                    level=0,
+                )
+                md_lines.append(md_task)
+
+                # Filhas desta tarefa
+                children = [
+                    t
+                    for t in stage_tasks
+                    if t.get("parent_id") and t["parent_id"][0] == task["id"]
+                ]
+                for child in children:
+                    child_completed = (
+                        child.get("stage_id")
+                        and "conclu" in str(child.get("stage_id")[1]).lower()
+                        if isinstance(child.get("stage_id"), (list, tuple))
+                        else False
+                    )
+                    md_child = format_task_to_markdown(
+                        task_name=child["name"],
+                        odoo_id=child["id"],
+                        completed=child_completed,
+                        level=1,
+                    )
+                    md_lines.append(md_child)
+
+            md_lines.append("")
+    else:
+        # Lista simples (organizar por hierarquia)
+        md_lines.append("## Tarefas")
+        md_lines.append("")
+
+        parents = [t for t in tasks if not t.get("parent_id")]
+
+        for task in parents:
+            completed = (
+                task.get("stage_id")
+                and "conclu" in str(task.get("stage_id")[1]).lower()
+                if isinstance(task.get("stage_id"), (list, tuple))
+                else False
+            )
+            stage_name = (
+                task.get("stage_id")[1]
+                if isinstance(task.get("stage_id"), (list, tuple))
+                else ""
+            )
+
+            md_task = format_task_to_markdown(
+                task_name=task["name"], odoo_id=task["id"], completed=completed, level=0
+            )
+            md_lines.append(md_task)
+
+            # Adicionar estágio como comentário
+            if stage_name:
+                md_lines.append(f"  - *Estágio: {stage_name}*")
+
+            # Filhas
+            children = [
+                t
+                for t in tasks
+                if t.get("parent_id") and t["parent_id"][0] == task["id"]
+            ]
+            for child in children:
+                child_completed = (
+                    child.get("stage_id")
+                    and "conclu" in str(child.get("stage_id")[1]).lower()
+                    if isinstance(child.get("stage_id"), (list, tuple))
+                    else False
+                )
+                md_child = format_task_to_markdown(
+                    task_name=child["name"],
+                    odoo_id=child["id"],
+                    completed=child_completed,
+                    level=1,
+                )
+                md_lines.append(md_child)
+
+    # Salvar arquivo
+    markdown_content = "\n".join(md_lines)
+
+    try:
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write(markdown_content)
+        console.print(
+            f"[green]✓ Markdown exportado para:[/green] [cyan]{output_file}[/cyan]"
+        )
+        console.print(f"Total: {len(tasks)} tarefas")
+    except Exception as e:
+        console.print(f"[red]❌ Erro ao salvar arquivo: {e}[/red]")
         sys.exit(1)
 
 
