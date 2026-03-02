@@ -25,3 +25,11 @@ odoo-sync = "odoo_task_sync.cli.main:cli"
 package-dir = {"odoo_task_sync" = "src"}
 packages = ["odoo_task_sync", "odoo_task_sync.cli", "odoo_task_sync.sync"]
 include-package-data = true
+
+[tool.setuptools.package-data]
+odoo_task_sync = [
+    "../AI_SYSTEM_PROMPT.md",
+    "../docs/task-html-spec.md",
+    "../docs/architecture/*.md",
+    "../docs/api-reference/*.md",
+]

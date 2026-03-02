@@ -1,0 +1,3 @@
+include AI_SYSTEM_PROMPT.md
+include README.md
+recursive-include docs *.md

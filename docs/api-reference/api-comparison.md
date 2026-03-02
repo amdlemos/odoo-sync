@@ -524,21 +524,19 @@ for p in projects:
 
 ### Arquivos do Projeto
 
-1. **`docs/odoo_api_integration_guide.md`**
+1. **`docs/api-reference/integration-guide.md`**
    - Guia completo com todos os detalhes
    - Exemplos de XML-RPC, JSON-RPC, REST, GraphQL
-   - 500+ linhas de documentação técnica
+   - 2700+ linhas de documentação técnica
 
-2. **`docs/odoo_api_python_examples.py`**
-   - Código Python pronto para uso
-   - Classes completas (OdooXMLRPCClient, OdooJSONRPCClient)
-   - Exemplos executáveis
-   - 1000+ linhas de código comentado
-
-3. **`docs/API_INTEGRATION_SUMMARY.md`** (este arquivo)
+2. **`docs/api-reference/api-comparison.md`** (este arquivo)
    - Resumo executivo
    - Decisões rápidas
    - Quick start
+
+3. **`docs/architecture/multi-agent-timesheets.md`**
+   - Arquitetura de timesheets para múltiplos agentes IA
+   - Pool de agentes e alocação automática
 
 ### Documentação Oficial
 
@@ -619,8 +617,8 @@ for task_id in tasks:
 
 Para dúvidas sobre a implementação:
 
-1. Consulte o guia completo: `docs/odoo_api_integration_guide.md`
-2. Rode os exemplos: `python docs/odoo_api_python_examples.py`
+1. Consulte o guia completo: `docs/api-reference/integration-guide.md`
+2. Veja a arquitetura de multi-agentes: `docs/architecture/multi-agent-timesheets.md`
 3. Documentação oficial Odoo: https://www.odoo.com/documentation/18.0/
 
 ---

@@ -12,6 +12,50 @@ from rich.console import Console
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from src.sync.odoo_client import OdooClient
+
+
+# Helper function to find package resources (works in dev and installed mode)
+def get_package_resource(relative_path: str) -> Path:
+    """
+    Get path to a package resource file.
+
+    Tries multiple strategies:
+    1. Relative to this file (development mode)
+    2. Using importlib.resources (installed mode, Python 3.9+)
+
+    Args:
+        relative_path: Path relative to package root (e.g., "AI_SYSTEM_PROMPT.md")
+
+    Returns:
+        Path to the resource file
+    """
+    # Strategy 1: Development mode - relative to this file
+    dev_path = Path(__file__).parent.parent.parent / relative_path
+    if dev_path.exists():
+        return dev_path
+
+    # Strategy 2: Installed mode - try importlib.resources
+    try:
+        import importlib.resources as pkg_resources
+
+        # For Python 3.9+, use files() API
+        if hasattr(pkg_resources, "files"):
+            try:
+                # Try to get the file from the package
+                package_files = pkg_resources.files("odoo_task_sync")
+                resource_path = package_files / ".." / relative_path
+                if resource_path.exists():
+                    return Path(str(resource_path))
+            except Exception:
+                pass
+    except ImportError:
+        pass
+
+    # Fallback: return the dev path even if it doesn't exist
+    # (will trigger appropriate error messages later)
+    return dev_path
+
+
 from src.cli.markdown_parser import (
     parse_tasks_from_markdown,
     build_hierarchy,
@@ -132,16 +176,16 @@ def init(migrate):
 
     # Create main.md from packaged AI_SYSTEM_PROMPT.md if available, otherwise write a default
     if not main_file.exists():
-        packaged_prompt = Path(__file__).parent.parent.parent / "AI_SYSTEM_PROMPT.md"
+        packaged_prompt = get_package_resource("AI_SYSTEM_PROMPT.md")
         if packaged_prompt.exists():
             try:
                 shutil.copyfile(packaged_prompt, main_file)
                 console.print(
-                    f"[green]✓ Copiado {packaged_prompt} -> {main_file}[/green]"
+                    f"[green]✓ Copiado {packaged_prompt.name} -> {main_file}[/green]"
                 )
             except Exception:
                 console.print(
-                    f"[yellow]Aviso: falha ao copiar {packaged_prompt} para {main_file}[/yellow]"
+                    f"[yellow]Aviso: falha ao copiar AI_SYSTEM_PROMPT.md para {main_file}[/yellow]"
                 )
                 # fallback to a minimal default
                 default = "# Regras do Agente — Odoo Task Sync (em Português)\n\nIdioma obrigatório: Todas as tarefas, títulos e descrições devem estar em Português (pt-BR).\n"
@@ -152,7 +196,7 @@ def init(migrate):
             main_file.write_text(default, encoding="utf-8")
 
     # Copy packaged full HTML spec into specs.md if available and missing
-    packaged_spec = Path(__file__).parent.parent.parent / "docs" / "task-html-spec.md"
+    packaged_spec = get_package_resource("docs/task-html-spec.md")
     if packaged_spec.exists() and not specs_file.exists():
         try:
             shutil.copyfile(packaged_spec, specs_file)
@@ -285,8 +329,8 @@ def update(rules, yes):
     rules_dir = Path.cwd() / ".odoo-agent-rules"
     rules_dir.mkdir(parents=True, exist_ok=True)
 
-    packaged_prompt = Path(__file__).parent.parent.parent / "AI_SYSTEM_PROMPT.md"
-    packaged_spec = Path(__file__).parent.parent.parent / "docs" / "task-html-spec.md"
+    packaged_prompt = get_package_resource("AI_SYSTEM_PROMPT.md")
+    packaged_spec = get_package_resource("docs/task-html-spec.md")
 
     targets = [
         (packaged_prompt, rules_dir / "main.md"),
@@ -448,10 +492,18 @@ def task_show(task, output_json):
 @task.command(name="list")
 @click.option("--project", "-p", type=int, help="Filtrar por ID do projeto")
 @click.option("--stage", "-s", type=int, help="Filtrar por ID do estágio")
+@click.option("--stage-name", "-sn", help="Filtrar por nome do estágio (fuzzy match)")
 @click.option("--user", "-u", type=int, help="Filtrar por usuário atribuído")
 @click.option("--limit", "-l", default=50, help="Limite de resultados (padrão: 50)")
 @click.option("--json", "-j", "output_json", is_flag=True, help="Saída em formato JSON")
-def task_list(project, stage, user, limit, output_json):
+@click.option("--summary", is_flag=True, help="Mostrar contagem por estágio")
+@click.option(
+    "--format",
+    type=click.Choice(["table", "json", "markdown"]),
+    default="table",
+    help="Formato de saída",
+)
+def task_list(project, stage, stage_name, user, limit, output_json, summary, format):
     """Listar tarefas (query ao vivo no Odoo)"""
     load_config()
     client = get_client()
@@ -474,6 +526,37 @@ def task_list(project, stage, user, limit, output_json):
         except ValueError:
             pass
 
+    # Se stage_name fornecido, buscar ID do estágio por fuzzy match
+    if stage_name and not stage:
+        try:
+            from difflib import SequenceMatcher
+
+            stages = client.odoo.env["project.task.type"].search_read([], ["name"])
+
+            best_match = None
+            best_score = 0.0
+            for s in stages:
+                score = SequenceMatcher(
+                    None, stage_name.lower(), s["name"].lower()
+                ).ratio()
+                if score > best_score:
+                    best_score = score
+                    best_match = s
+
+            if best_match and best_score >= 0.6:
+                domain.append(("stage_id", "=", best_match["id"]))
+                console.print(
+                    f"[yellow]Filtrando por estágio: {best_match['name']} (match: {best_score:.0%})[/yellow]"
+                )
+            else:
+                console.print(
+                    f"[red]❌ Nenhum estágio encontrado com nome similar a '{stage_name}'[/red]"
+                )
+                sys.exit(1)
+        except Exception as e:
+            console.print(f"[red]❌ Erro ao buscar estágio: {e}[/red]")
+            sys.exit(1)
+
     try:
         tasks = client.get_tasks(domain=domain, limit=limit)
     except Exception as e:
@@ -484,22 +567,84 @@ def task_list(project, stage, user, limit, output_json):
         console.print("[yellow]Nenhuma tarefa encontrada.[/yellow]")
         return
 
-    if output_json:
+    # Se --summary, mostrar contagem por estágio
+    if summary:
+        from collections import defaultdict
+
+        stage_counts = defaultdict(int)
+        for t in tasks:
+            stage = t.get("stage_id")
+            stage_name_display = (
+                stage[1]
+                if isinstance(stage, (list, tuple)) and len(stage) > 1
+                else "Sem estágio"
+            )
+            stage_counts[stage_name_display] += 1
+
+        console.print("\n[bold]📊 Resumo por Estágio:[/bold]\n")
+        for stage_name_display, count in sorted(stage_counts.items()):
+            console.print(f"  {stage_name_display}: [cyan]{count}[/cyan]")
+        console.print(f"\n[bold]Total: {len(tasks)} tarefa(s)[/bold]\n")
+        return
+
+    # Saída JSON (backward compatibility)
+    if output_json or format == "json":
         console.print(json.dumps(tasks, indent=2, ensure_ascii=False, default=str))
         return
 
-    # Pretty print
+    # Saída Markdown
+    if format == "markdown":
+        from .markdown_parser import format_task_to_markdown
+
+        console.print("\n# Tarefas\n")
+        for t in tasks:
+            task_name = t.get("name") or t.get("display_name") or "<sem nome>"
+            task_id = t.get("id")
+            # Considerar concluído se estágio contém "conclu" ou "done"
+            stage = t.get("stage_id")
+            stage_name_lower = ""
+            if isinstance(stage, (list, tuple)) and len(stage) > 1:
+                stage_name_lower = stage[1].lower()
+            completed = "conclu" in stage_name_lower or "done" in stage_name_lower
+
+            description = t.get("description") or ""
+            # Remove HTML tags
+            if description:
+                import re
+
+                description = re.sub("<[^<]+?>", "", description)
+                description = (
+                    description.replace("&nbsp;", " ")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&amp;", "&")
+                    .strip()
+                )
+
+            md_line = format_task_to_markdown(
+                task_name=task_name,
+                odoo_id=task_id,
+                completed=completed,
+                level=0,
+                description=description[:200]
+                if description
+                else "",  # Limite descrição
+            )
+            console.print(md_line)
+        return
+
+    # Saída Table (padrão)
     console.print(f"\n[bold]Encontradas {len(tasks)} tarefa(s):[/bold]\n")
     for t in tasks:
         tid = t.get("id")
         name = t.get("name") or t.get("display_name") or "<sem nome>"
         stage = t.get("stage_id")
-        stage_name = (
+        stage_name_display = (
             stage[1] if isinstance(stage, (list, tuple)) and len(stage) > 1 else "?"
         )
 
         console.print(f"[cyan][{tid}][/cyan] {name}")
-        console.print(f"  └─ Estágio: {stage_name}\n")
+        console.print(f"  └─ Estágio: {stage_name_display}\n")
 
 
 @task.command(name="children")
@@ -546,6 +691,37 @@ def task_children(task, fields, is_json):
         console.print(f"[{tid}] {name} (stage: {stage})")
 
 
+@task.command(name="tags")
+@click.option(
+    "--project", "-p", type=int, help="Filtrar tags por ID do projeto (opcional)"
+)
+@click.option("--json", "-j", "as_json", is_flag=True, help="Imprimir JSON cru")
+def task_tags(project, as_json):
+    """Listar tags/etiquetas disponíveis (opcional por projeto)"""
+    load_config()
+    client = get_client()
+
+    try:
+        tags = client.get_tags(project_id=project)
+    except Exception as e:
+        console.print(f"[red]❌ Erro ao buscar tags: {e}[/red]")
+        sys.exit(1)
+
+    if not tags:
+        console.print("[yellow]Nenhuma tag encontrada.[/yellow]")
+        return
+
+    if as_json:
+        console.print(json.dumps(tags, indent=2, ensure_ascii=False))
+        return
+
+    console.print(f"\n[bold]Tags encontradas ({len(tags)}):[/bold]\n")
+    for t in tags:
+        tid = t.get("id")
+        name = t.get("name") or "<sem nome>"
+        console.print(f"[cyan][{tid}][/cyan] {name}")
+
+
 @task.command(name="create")
 @click.option("--name", required=True, help="Nome da tarefa")
 @click.option("--desc", default="", help="Descrição da tarefa")
@@ -559,8 +735,15 @@ def task_children(task, fields, is_json):
     multiple=True,
     help="IDs de usuários para atribuir (use múltiplas vezes)",
 )
+@click.option(
+    "--tag",
+    "-g",
+    type=int,
+    multiple=True,
+    help="IDs de tags para adicionar (use múltiplas vezes)",
+)
 @click.option("--dry-run", is_flag=True, help="Mostrar payload e não criar a tarefa")
-def task_create(name, desc, project, parent, stage, assign, dry_run):
+def task_create(name, desc, project, parent, stage, assign, tag, dry_run):
     """Criar uma nova tarefa no Odoo a partir da linha de comando"""
     # Carrega configuração para obter DEFAULT_PROJECT_ID se necessário
     load_config()
@@ -584,6 +767,9 @@ def task_create(name, desc, project, parent, stage, assign, dry_run):
     if assign:
         # user_ids uses the Odoo (6, 0, [ids]) command for many2many replacement
         values["user_ids"] = [(6, 0, list(assign))]
+    if tag:
+        # tag_ids uses the same Odoo command for many2many
+        values["tag_ids"] = [(6, 0, list(tag))]
 
     if dry_run:
         console.print("[yellow]DRY RUN - Payload preparado para criação:[/yellow]")
@@ -628,6 +814,18 @@ def task_create(name, desc, project, parent, stage, assign, dry_run):
     is_flag=True,
     help="Remove todos os usuários atribuídos (user_ids=[])",
 )
+@click.option(
+    "--tag",
+    "-g",
+    type=int,
+    multiple=True,
+    help="IDs de tags para atribuir (substitui as atuais)",
+)
+@click.option(
+    "--clear-tags",
+    is_flag=True,
+    help="Remove todas as tags (tag_ids=[])",
+)
 @click.option("--dry-run", is_flag=True, help="Mostrar payload e não executar")
 def task_update(
     task,
@@ -639,6 +837,8 @@ def task_update(
     stage,
     assign,
     clear_assign,
+    tag,
+    clear_tags,
     dry_run,
 ):
     """Atualizar campos de uma tarefa existente. Permite desvincular parent_id."""
@@ -672,6 +872,11 @@ def task_update(
         values["user_ids"] = [(6, 0, [])]
     elif assign:
         values["user_ids"] = [(6, 0, list(assign))]
+    # tags handling
+    if clear_tags:
+        values["tag_ids"] = [(6, 0, [])]
+    elif tag:
+        values["tag_ids"] = [(6, 0, list(tag))]
 
     if not values:
         console.print(
@@ -723,6 +928,308 @@ def task_delete(task, yes):
             sys.exit(1)
     except Exception as e:
         console.print(f"[red]❌ Erro ao deletar tarefa: {e}[/red]")
+        sys.exit(1)
+
+
+@task.command(name="batch-create")
+@click.option("--file", "-f", required=True, help="Arquivo Markdown com tarefas")
+@click.option(
+    "--project", "-p", type=int, help="ID do projeto (padrão: DEFAULT_PROJECT_ID)"
+)
+@click.option(
+    "--section", "-s", help="Criar apenas tarefas desta seção (nome da seção)"
+)
+@click.option("--dry-run", is_flag=True, help="Preview sem criar no Odoo")
+@click.option(
+    "--auto-update-file", is_flag=True, help="Atualizar arquivo MD com IDs criados"
+)
+def task_batch_create(file, project, section, dry_run, auto_update_file):
+    """Criar tarefas em lote a partir de um arquivo Markdown"""
+    load_config()
+
+    # Carregar projeto padrão se não informado
+    if not project and os.getenv("DEFAULT_PROJECT_ID"):
+        try:
+            project = int(os.getenv("DEFAULT_PROJECT_ID"))
+        except ValueError:
+            pass
+
+    if not project:
+        console.print(
+            "[red]❌ Erro: --project é obrigatório ou configure DEFAULT_PROJECT_ID[/red]"
+        )
+        sys.exit(1)
+
+    # Ler arquivo Markdown
+    try:
+        with open(file, "r", encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        console.print(f"[red]❌ Arquivo não encontrado: {file}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]❌ Erro ao ler arquivo: {e}[/red]")
+        sys.exit(1)
+
+    # Parse Markdown
+    tasks = parse_tasks_from_markdown(content)
+
+    if not tasks:
+        console.print("[yellow]Nenhuma tarefa encontrada no Markdown.[/yellow]")
+        return
+
+    # Filtrar por seção se especificado
+    if section:
+        tasks = [t for t in tasks if section.lower() in t.section.lower()]
+        if not tasks:
+            console.print(
+                f"[yellow]Nenhuma tarefa encontrada na seção '{section}'.[/yellow]"
+            )
+            return
+
+    # Filtrar apenas tarefas SEM ID (as novas)
+    new_tasks = [t for t in tasks if not t.odoo_id]
+
+    if not new_tasks:
+        console.print(
+            "[yellow]Todas as tarefas já têm IDs do Odoo. Nada para criar.[/yellow]"
+        )
+        console.print(f"Total no arquivo: {len(tasks)} tarefas")
+        return
+
+    console.print(f"[cyan]Encontradas {len(new_tasks)} tarefas novas para criar[/cyan]")
+
+    if dry_run:
+        console.print(
+            "\n[yellow]DRY RUN - Preview das tarefas que seriam criadas:[/yellow]\n"
+        )
+        for idx, task in enumerate(new_tasks, start=1):
+            parent_info = f" (parent nível {task.level - 1})" if task.level > 0 else ""
+            console.print(f"{idx}. [{task.section}] {task.name}{parent_info}")
+            if task.description:
+                console.print(f"   Descrição: {task.description[:100]}...")
+        return
+
+    # Criar no Odoo
+    client = get_client()
+    created_ids = {}
+    parent_map = {}  # level -> parent_id
+
+    console.print("\n[yellow]Criando tarefas no Odoo...[/yellow]\n")
+
+    for idx, task in enumerate(new_tasks, start=1):
+        # Determinar parent_id baseado no nível de indentação
+        parent_id = None
+        if task.level > 0:
+            # Buscar parent do nível anterior
+            parent_id = parent_map.get(task.level - 1)
+
+        # Preparar payload
+        values = {"name": task.name, "project_id": project}
+
+        if task.description:
+            values["description"] = task.description
+
+        if parent_id:
+            values["parent_id"] = parent_id
+
+        try:
+            task_id = client.create_task(values)
+            created_ids[task.name] = task_id
+            parent_map[task.level] = task_id  # Esta tarefa pode ser parent de próximas
+
+            parent_info = f" (filha de #{parent_id})" if parent_id else ""
+            console.print(
+                f"[green]✓ [{idx}/{len(new_tasks)}] Criada:[/green] {task.name} [cyan](#{task_id})[/cyan]{parent_info}"
+            )
+
+        except Exception as e:
+            console.print(
+                f"[red]✗ [{idx}/{len(new_tasks)}] Falha:[/red] {task.name} - {e}"
+            )
+
+    console.print(f"\n[green]✓ Criadas {len(created_ids)} tarefas com sucesso![/green]")
+
+    # Atualizar arquivo MD com IDs se solicitado
+    if auto_update_file and created_ids:
+        try:
+            updated_content = update_markdown_with_ids(content, created_ids)
+
+            # Backup do original
+            backup_file = file + ".bak"
+            import shutil
+
+            shutil.copy(file, backup_file)
+
+            # Salvar atualizado
+            with open(file, "w", encoding="utf-8") as f:
+                f.write(updated_content)
+
+            console.print(
+                f"[green]✓ Arquivo atualizado com IDs:[/green] [cyan]{file}[/cyan]"
+            )
+            console.print(f"[yellow]Backup salvo em:[/yellow] {backup_file}")
+        except Exception as e:
+            console.print(f"[red]❌ Erro ao atualizar arquivo: {e}[/red]")
+
+
+@task.command(name="sync-ids")
+@click.option("--file", "-f", required=True, help="Arquivo Markdown para atualizar")
+@click.option(
+    "--project", "-p", type=int, help="ID do projeto (padrão: DEFAULT_PROJECT_ID)"
+)
+@click.option("--threshold", default=0.8, help="Similaridade mínima para match (0-1)")
+@click.option("--dry-run", is_flag=True, help="Preview sem salvar mudanças")
+@click.option(
+    "--update-status",
+    is_flag=True,
+    help="Atualizar [ ] → [x] baseado em estágio 'concluído'",
+)
+def task_sync_ids(file, project, threshold, dry_run, update_status):
+    """Sincronizar IDs do Odoo no arquivo Markdown (match por nome)"""
+    load_config()
+
+    # Carregar projeto padrão se não informado
+    if not project and os.getenv("DEFAULT_PROJECT_ID"):
+        try:
+            project = int(os.getenv("DEFAULT_PROJECT_ID"))
+        except ValueError:
+            pass
+
+    if not project:
+        console.print(
+            "[red]❌ Erro: --project é obrigatório ou configure DEFAULT_PROJECT_ID[/red]"
+        )
+        sys.exit(1)
+
+    # Ler arquivo Markdown
+    try:
+        with open(file, "r", encoding="utf-8") as f:
+            content = f.read()
+    except FileNotFoundError:
+        console.print(f"[red]❌ Arquivo não encontrado: {file}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]❌ Erro ao ler arquivo: {e}[/red]")
+        sys.exit(1)
+
+    # Parse Markdown
+    md_tasks = parse_tasks_from_markdown(content)
+    tasks_without_ids = [t for t in md_tasks if not t.odoo_id]
+
+    if not tasks_without_ids:
+        console.print("[green]✓ Todas as tarefas já têm IDs do Odoo![/green]")
+        return
+
+    console.print(
+        f"[cyan]Encontradas {len(tasks_without_ids)} tarefas sem ID no Markdown[/cyan]"
+    )
+
+    # Buscar tarefas do Odoo
+    client = get_client()
+    try:
+        odoo_tasks = client.get_project_tasks(
+            project_id=project, include_completed=True
+        )
+    except Exception as e:
+        console.print(f"[red]❌ Erro ao buscar tarefas do Odoo: {e}[/red]")
+        sys.exit(1)
+
+    if not odoo_tasks:
+        console.print(
+            "[yellow]Nenhuma tarefa encontrada no Odoo para este projeto.[/yellow]"
+        )
+        return
+
+    # Match tarefas por nome (fuzzy)
+    from difflib import SequenceMatcher
+
+    task_id_mapping = {}
+    matched_count = 0
+
+    console.print(f"\n[yellow]Buscando matches (threshold: {threshold})...[/yellow]\n")
+
+    for md_task in tasks_without_ids:
+        best_match = None
+        best_ratio = 0.0
+
+        for odoo_task in odoo_tasks:
+            ratio = SequenceMatcher(
+                None, md_task.name.lower(), odoo_task["name"].lower()
+            ).ratio()
+            if ratio > best_ratio and ratio >= threshold:
+                best_ratio = ratio
+                best_match = odoo_task
+
+        if best_match:
+            task_id_mapping[md_task.name] = best_match["id"]
+            matched_count += 1
+            console.print(
+                f"[green]✓ Match ({best_ratio:.0%}):[/green] '{md_task.name}' → #{best_match['id']}"
+            )
+        else:
+            console.print(f"[yellow]✗ Sem match:[/yellow] '{md_task.name}'")
+
+    if not task_id_mapping:
+        console.print(
+            "\n[yellow]Nenhum match encontrado. Tente reduzir --threshold ou verifique nomes.[/yellow]"
+        )
+        return
+
+    console.print(f"\n[cyan]Total: {matched_count} matches encontrados[/cyan]")
+
+    if dry_run:
+        console.print("\n[yellow]DRY RUN - IDs que seriam adicionados:[/yellow]")
+        for name, task_id in task_id_mapping.items():
+            console.print(f"  {name} → (#{task_id})")
+        return
+
+    # Atualizar arquivo
+    updated_content = update_markdown_with_ids(content, task_id_mapping)
+
+    # Atualizar status [ ] → [x] se solicitado
+    if update_status:
+        # Buscar estágios "concluído" no Odoo
+        for odoo_task in odoo_tasks:
+            if odoo_task["id"] in task_id_mapping.values():
+                stage = odoo_task.get("stage_id")
+                if stage and isinstance(stage, (list, tuple)) and len(stage) > 1:
+                    stage_name = stage[1].lower()
+                    if (
+                        "conclu" in stage_name
+                        or "done" in stage_name
+                        or "finaliz" in stage_name
+                    ):
+                        # Marcar como concluída no markdown
+                        task_name = [
+                            k
+                            for k, v in task_id_mapping.items()
+                            if v == odoo_task["id"]
+                        ][0]
+                        updated_content = updated_content.replace(
+                            f"- [ ] {task_name}", f"- [x] {task_name}"
+                        )
+
+    # Backup do original
+    backup_file = file + ".bak"
+    import shutil
+
+    try:
+        shutil.copy(file, backup_file)
+    except Exception as e:
+        console.print(f"[yellow]Aviso: Falha ao criar backup: {e}[/yellow]")
+
+    # Salvar atualizado
+    try:
+        with open(file, "w", encoding="utf-8") as f:
+            f.write(updated_content)
+
+        console.print(f"\n[green]✓ Arquivo atualizado:[/green] [cyan]{file}[/cyan]")
+        console.print(f"[green]✓ {matched_count} IDs adicionados[/green]")
+        if backup_file:
+            console.print(f"[yellow]Backup salvo em:[/yellow] {backup_file}")
+    except Exception as e:
+        console.print(f"[red]❌ Erro ao salvar arquivo: {e}[/red]")
         sys.exit(1)
 
 

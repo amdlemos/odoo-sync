@@ -44,10 +44,50 @@ class OdooClient:
         # Timesheets
         "timesheet_ids",
         "allow_timesheets",
+        # Tags (many2many)
+        "tag_ids",
         # Auditoria
         "create_uid",
         "write_uid",
     ]
+
+    def get_tags(self, project_id: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Buscar tags (etiquetas) usadas em tarefas/projetos.
+
+        Args:
+            project_id: Se informado, filtra tags relacionadas ao projeto
+
+        Returns:
+            Lista de dicionários com campos `id` e `name`
+        """
+        # Model name may vary between Odoo installs / custom modules. Try common names.
+        candidates = [
+            "project.tags",
+            "project.tag",
+            "project.task.tag",
+            "project.task.tags",
+        ]
+        for model in candidates:
+            try:
+                Tag = self.env[model]
+            except Exception:
+                continue
+
+            domain = []
+            if project_id:
+                # Many2many relation is commonly `project_ids`
+                domain.append(("project_ids", "in", [project_id]))
+
+            try:
+                tags = Tag.search_read(domain, ["id", "name"])
+                # Normalize to simple dicts
+                return tags
+            except Exception:
+                continue
+
+        # If none found, return empty list
+        return []
 
     def __init__(
         self,

@@ -8,7 +8,7 @@ Esta pasta contém documentação completa e detalhada sobre integração com a 
 
 ## 📁 Arquivos Disponíveis
 
-### 1. 🎯 **API_INTEGRATION_SUMMARY.md** (COMECE AQUI!)
+### 1. 🎯 **api-comparison.md** (COMECE AQUI!)
 **Tamanho:** 17 KB | **Linhas:** 631
 
 **Conteúdo:**
@@ -28,7 +28,7 @@ Esta pasta contém documentação completa e detalhada sobre integração com a 
 
 ---
 
-### 2. 📘 **odoo_api_integration_guide.md** (GUIA COMPLETO)
+### 2. 📘 **integration-guide.md** (GUIA COMPLETO)
 **Tamanho:** 73 KB | **Linhas:** 2.733
 
 **Conteúdo:**
@@ -56,7 +56,7 @@ Esta pasta contém documentação completa e detalhada sobre integração com a 
 
 ---
 
-### 3. 💻 **odoo_api_python_examples.py** (CÓDIGO EXECUTÁVEL)
+### 3. 💻 **examples.py** (CÓDIGO EXECUTÁVEL)
 **Tamanho:** 37 KB | **Linhas:** 1.134
 
 **Conteúdo:**
@@ -93,7 +93,7 @@ ODOO_USERNAME = 'admin@example.com'
 ODOO_PASSWORD = 'admin'
 
 # Executar exemplos
-python docs/odoo_api_python_examples.py
+python docs/api-reference/examples.py
 ```
 
 **Para quem:**
@@ -108,27 +108,26 @@ python docs/odoo_api_python_examples.py
 ### Se você quer...
 
 #### ⚡ **Decisão rápida (5 min)**
-→ Leia: `API_INTEGRATION_SUMMARY.md`
+→ Leia: `api-comparison.md`
 - Veja a tabela comparativa
 - Leia a seção "Recomendação"
 - Copie o código "Quick Start"
 
 #### 🎓 **Entender todas as opções (1h)**
-→ Leia: `odoo_api_integration_guide.md`
+→ Leia: `integration-guide.md`
 - Seções: 1-4 (XML-RPC, JSON-RPC, REST, GraphQL)
 - Seção 5 (Comparação)
 - Seção 6 (Recomendações)
 
 #### 💻 **Implementar agora (30 min)**
-→ Use: `odoo_api_python_examples.py`
+→ Use: `examples.py`
 - Configure as variáveis
 - Execute os exemplos
 - Customize para seu caso
 
 #### 🔄 **Sincronização bidirecional completa (2-4h)**
-→ Leia: `odoo_api_integration_guide.md` (seção completa)
-→ Use: `odoo_api_python_examples.py` (classe `OdooBidirectionalSync`)
-→ Referência: `API_INTEGRATION_SUMMARY.md` (checklist)
+→ Leia: `integration-guide.md` (seção completa)
+→ Referência: `api-comparison.md` (checklist)
 
 ---
 
@@ -284,7 +283,7 @@ pip install odoorpc
 ### Exemplo 1: Buscar tarefas de um projeto
 
 ```python
-from odoo_api_python_examples import OdooJSONRPCClient
+from examples import OdooJSONRPCClient
 
 client = OdooJSONRPCClient(
     url='http://localhost:8069',
@@ -301,7 +300,7 @@ for task in tasks:
 ### Exemplo 2: Criar tarefa com subtarefas
 
 ```python
-from odoo_api_python_examples import OdooXMLRPCClient
+from examples import OdooXMLRPCClient
 
 client = OdooXMLRPCClient(
     url='http://localhost:8069',
@@ -331,7 +330,7 @@ print(f"Tarefas de {user['name']}: {len(my_tasks)}")
 ### Exemplo 4: Sincronização bidirecional
 
 ```python
-from odoo_api_python_examples import OdooBidirectionalSync
+from examples import OdooBidirectionalSync
 from datetime import datetime, timedelta
 
 client = OdooXMLRPCClient(...)
@@ -411,14 +410,13 @@ print(f"Criadas: {stats['created']}, Atualizadas: {stats['updated']}")
 - [ ] Credenciais de administrador
 
 ### Implementação
-- [ ] Ler `API_INTEGRATION_SUMMARY.md`
+- [ ] Ler `api-comparison.md`
 - [ ] Escolher abordagem (JSON-RPC recomendado)
-- [ ] Configurar variáveis em `odoo_api_python_examples.py`
-- [ ] Executar exemplos básicos
+- [ ] Consultar `integration-guide.md` para detalhes técnicos
+- [ ] Implementar cliente básico
 - [ ] Customizar para seu caso
-- [ ] Implementar sync bidirecional
 - [ ] Configurar logging
-- [ ] Testar resolução de conflitos
+- [ ] Testar integração
 
 ### Produção
 - [ ] Criar usuário técnico dedicado
@@ -435,16 +433,21 @@ print(f"Criadas: {stats['created']}, Atualizadas: {stats['updated']}")
 
 1. **Leia o resumo executivo**
    ```bash
-   less docs/API_INTEGRATION_SUMMARY.md
+   less docs/api-reference/api-comparison.md
    ```
 
 2. **Execute os exemplos**
    ```bash
-   python docs/odoo_api_python_examples.py
+   python docs/api-reference/examples.py
    ```
 
-3. **Customize para seu caso**
-   - Copie as classes necessárias
+3. **Consulte o guia completo**
+   ```bash
+   less docs/api-reference/integration-guide.md
+   ```
+
+4. **Customize para seu caso**
+   - Copie as classes de examples.py
    - Adapte para seu sistema externo
    - Implemente lógica de negócio
 

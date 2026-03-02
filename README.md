@@ -123,6 +123,139 @@ DEFAULT_PROJECT_ID=5
 
 ## 📖 Comandos Principais
 
+### Workflow com Markdown (Planejamento e Criação em Lote)
+
+O `odoo-sync` permite gerenciar tarefas através de arquivos Markdown versionáveis (Git), ideal para planejamento inicial de projetos.
+
+#### 🎯 Conceito
+
+- **Odoo** = Sistema Operacional (timesheets, estágios, horas, IDs reais)
+- **Markdown** = Documentação/Guia (roadmap do projeto, versionável no Git)
+- **IDs no Markdown** = Referências visuais `(#123)`, não duplicam dados
+- **Sincronização** = Manual via comandos explícitos (não automático)
+
+#### 📝 Formato do Markdown
+
+```markdown
+# Projeto E-commerce API
+
+## Módulo de Autenticação
+- [ ] Criar model Usuario (#101)
+  - Campos: nome, email, senha_hash
+  - Validações: email único
+- [x] Controller de Login (#102)
+  - Endpoint POST /api/login
+  - Retorna JWT token
+
+## Módulo de Vendas  
+- [ ] Criar model Produto
+  - Campos: nome, preco, estoque
+  - [ ] Adicionar validações de estoque (#103)
+    - Estoque não pode ser negativo
+```
+
+**Regras:**
+- `- [ ]` ou `- [x]` → tarefas (checkbox indica status)
+- `(#ID)` → referência ao ID do Odoo
+- Indentação (2 espaços) → hierarquia parent/child (sem limite de níveis)
+- Linhas indentadas após tarefa → descrição inline
+- Seções `##` → organização lógica (não afeta Odoo)
+
+#### 🚀 Cenário 1: Projeto Novo (Markdown → Odoo)
+
+**1. Escreva o planejamento em Markdown:**
+
+```markdown
+# API de E-commerce
+
+## Autenticação
+- [ ] Criar model Usuario
+  - Campos: nome, email, senha_hash
+  - Validação: email único
+- [ ] Endpoint de registro
+  - POST /api/auth/register
+  - Validar formato de email
+```
+
+**2. Crie as tarefas em lote no Odoo:**
+
+```bash
+odoo-sync task batch-create --file tasks.md --project 5 --auto-update-file
+```
+
+**O que acontece:**
+- ✅ Cria todas as tarefas no Odoo com hierarquia parent/child
+- ✅ Atualiza `tasks.md` automaticamente adicionando IDs: `(#123)`, `(#124)`, etc.
+- ✅ Descrições inline viram campo `description` no Odoo
+
+**3. Trabalhe normalmente:**
+
+```bash
+# Usuário escolhe tarefa no Odoo web UI
+# Agente usa o ID para trabalhar
+odoo-sync task show --task 123
+odoo-sync timer start --task 123 --desc "Implementar model Usuario" --model "claude"
+# ... trabalho ...
+odoo-sync timer stop --id 789
+```
+
+#### 📤 Cenário 2: Projeto Existente (Odoo → Markdown)
+
+**1. Exporte projeto existente para Markdown:**
+
+```bash
+# Exportar tudo
+odoo-sync task export-markdown --project 5 --output roadmap.md
+
+# Exportar agrupado por estágio
+odoo-sync task export-markdown --project 5 --group-by-stage --output roadmap.md
+
+# Incluir tarefas concluídas
+odoo-sync task export-markdown --project 5 --include-completed --output roadmap.md
+```
+
+**2. Use o Markdown como documentação/referência:**
+- ✅ Versione no Git
+- ✅ Use para onboarding de novos desenvolvedores
+- ✅ Mantenha atualizado com `export-markdown` periodicamente
+
+#### 🔄 Cenário 3: Sincronização de IDs (Markdown ↔ Odoo)
+
+Se você criou tarefas manualmente no Odoo (ou no Markdown sem IDs):
+
+```bash
+# Adicionar IDs do Odoo ao Markdown (match fuzzy por nome)
+odoo-sync task sync-ids --file tasks.md --project 5
+
+# Também atualizar status [ ] → [x] baseado no estágio
+odoo-sync task sync-ids --file tasks.md --project 5 --update-status
+
+# Dry-run para ver o que será modificado
+odoo-sync task sync-ids --file tasks.md --project 5 --dry-run
+
+# Ajustar threshold de fuzzy match (padrão: 0.8)
+odoo-sync task sync-ids --file tasks.md --project 5 --threshold 0.7
+```
+
+#### 🛠️ Comandos Markdown Completos
+
+```bash
+# Exportar projeto → Markdown
+odoo-sync task export-markdown --project <ID> --output <arquivo.md>
+odoo-sync task export-markdown --project 5 --group-by-stage --include-completed
+
+# Criar tarefas em lote: Markdown → Odoo
+odoo-sync task batch-create --file <arquivo.md> --project <ID>
+odoo-sync task batch-create --file tasks.md --project 5 --section "Módulo de Vendas"
+odoo-sync task batch-create --file tasks.md --project 5 --dry-run
+odoo-sync task batch-create --file tasks.md --project 5 --auto-update-file
+
+# Sincronizar IDs: Markdown ↔ Odoo
+odoo-sync task sync-ids --file <arquivo.md> --project <ID>
+odoo-sync task sync-ids --file tasks.md --project 5 --update-status
+odoo-sync task sync-ids --file tasks.md --project 5 --threshold 0.7
+```
+
 ### Consulta de Tarefas (Stateless)
 
 ```bash
@@ -135,7 +268,14 @@ odoo-sync task list --project 5
 
 # Listar com filtros
 odoo-sync task list --project 5 --stage 10 --limit 20
-odoo-sync task list --user 2  # Tarefas atribuídas ao usuário ID 2
+odoo-sync task list --project 5 --stage-name "desenvolvimento"  # Filtrar por nome
+odoo-sync task list --project 5 --user 2  # Tarefas do usuário ID 2
+
+# Resumo de tarefas por estágio
+odoo-sync task list --project 5 --summary
+
+# Exportar lista como Markdown
+odoo-sync task list --project 5 --format markdown
 
 # Ver subtarefas
 odoo-sync task children --task 100
@@ -343,15 +483,21 @@ client.get_task_by_id(123, use_cache=False)
 odoo-sync/
 ├── src/
 │   ├── cli/
-│   │   ├── main.py         # CLI principal (comandos)
-│   │   └── importer.py     # Importador JSON
+│   │   ├── main.py            # CLI principal (comandos)
+│   │   └── markdown_parser.py # Parser de Markdown (hierarquia, fuzzy match)
 │   └── sync/
-│       └── odoo_client.py  # Cliente RPC + cache
+│       └── odoo_client.py     # Cliente RPC + cache
 ├── docs/
-│   └── task-html-spec.md   # Spec de HTML
-├── AI_SYSTEM_PROMPT.md     # Regras do agente (source)
-├── pyproject.toml          # Packaging
-└── README.md               # Este arquivo
+│   ├── task-html-spec.md               # Spec de HTML
+│   ├── architecture/
+│   │   └── multi-agent-timesheets.md   # Arquitetura de multi-agentes
+│   └── api-reference/
+│       ├── README.md                   # Índice de docs técnicas
+│       ├── api-comparison.md           # Comparação de APIs Odoo
+│       └── integration-guide.md        # Guia completo da API
+├── AI_SYSTEM_PROMPT.md                 # Regras do agente (source)
+├── pyproject.toml                      # Packaging
+└── README.md                           # Este arquivo
 ```
 
 ### Rodar Testes
@@ -372,6 +518,8 @@ pytest tests/
 
 - **AI_SYSTEM_PROMPT.md** — Regras completas para agentes de IA
 - **docs/task-html-spec.md** — Especificação canônica de HTML para descrições
+- **docs/architecture/multi-agent-timesheets.md** — Arquitetura de timesheets multi-agentes
+- **docs/api-reference/** — Guias técnicos de integração com API Odoo 18
 - **.odoo-agent-rules/** — Gerado por `odoo-sync init`, regras locais do projeto
 
 ## ❓ FAQ
