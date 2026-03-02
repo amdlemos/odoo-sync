@@ -156,9 +156,6 @@ def init(migrate):
                 f"[yellow]Aviso: falha ao copiar specs de {packaged_spec}[/yellow]"
             )
 
-    data_dir = Path.cwd() / "data" / "tasks"
-    data_dir.mkdir(parents=True, exist_ok=True)
-
     console.print(f"[green]✓ Projeto inicializado![/green]")
     console.print(f"Edite [cyan]{local_env}[/cyan] para definir o ID do projeto.")
     console.print(f"Instruções para Agentes IA: [cyan]{main_file}[/cyan]")
